@@ -7,11 +7,11 @@ def linear_interpolate(z1, z2, mesh = 10):
     diff = z2 - z1 #
     zerotoone = np.tile(np.linspace(0,1, mesh), (D,1)).T
     out = z1 + diff * zerotoone
-    return(out)
+    return out
 
-z1 = np.array([[0 , 1]]); z2 = np.array([[0, 2]])
+#z1 = np.array([[0 , 1]]); z2 = np.array([[0, 2]])
 
-linear_interpolate(z1,z2)
+#linear_interpolate(z1,z2)
 
-def quadrature():
+#def quadrature():
     

@@ -1,8 +1,8 @@
 import tensorflow as tf
-from gpflow.conditionals import conditional
 from gpflow.models import SVGP
 from gpflow.models.model import InputData
 from gpmaniflow.kernels import dSquaredExponential
+from gpmaniflow.conditionals import conditional
 
 class SVGP(SVGP):
     ''' 

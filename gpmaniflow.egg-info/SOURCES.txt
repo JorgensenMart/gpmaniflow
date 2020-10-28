@@ -1,0 +1,13 @@
+README.md
+setup.py
+gpmaniflow/__init__.py
+gpmaniflow.egg-info/PKG-INFO
+gpmaniflow.egg-info/SOURCES.txt
+gpmaniflow.egg-info/dependency_links.txt
+gpmaniflow.egg-info/top_level.txt
+gpmaniflow/curves/__init__.py
+gpmaniflow/curves/interpolators.py
+gpmaniflow/kernels/__init__.py
+gpmaniflow/kernels/stationaries.py
+gpmaniflow/models/SVGP.py
+gpmaniflow/models/__init__.py
