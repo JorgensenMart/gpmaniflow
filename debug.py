@@ -10,15 +10,19 @@ from gpflow.inducing_variables import InducingPoints
 import gpmaniflow
 from gpmaniflow.models.SVGP import SVGP
 
-pX = np.linspace(-5.0, 5.0, 300)[:, None]
-X = np.random.uniform(-3, 3, 100)[:, None]
-Y = 1 * X + np.random.randn(*X.shape) * 0.1
-Z = np.linspace(-5, 5, 50)[:, None]
+#pX = np.linspace(-5.0, 5.0, 200)[:, None]
+pX = np.reshape(np.random.uniform(-3, 3, 200*2), [200, 2])
+X = np.random.uniform(-3, 3, 100*2)[:, None]
+X = np.reshape(X, [100, 2])
+Y = 2 * X[:,0] + 1 * X[:,1] + np.random.randn(100) * 0.1
+Y = np.reshape(Y, [100,1])
+Z = np.random.uniform(-3, 3, 50*2)[:, None]
+Z = np.reshape(Z, [50, 2])
 
 train_dataset = tf.data.Dataset.from_tensor_slices((X, Y))
 train_dataset = train_dataset.shuffle(1024).batch(len(X))
 
-plt.plot(X,Y ,"x")
+#plt.plot(X,Y ,"x")
 
 kernel = gpflow.kernels.SquaredExponential()
 
@@ -39,5 +43,4 @@ for step in range(2000):
         elbo_hist.append(minibatch_elbo)
 
 ELBO = model.elbo((X,Y))
-
 dmu, dvar = model.predict_df(pX)

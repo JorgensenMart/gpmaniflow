@@ -29,5 +29,5 @@ class SVGP(SVGP):
         )
         #mu should be [Nd, D] same with var
         mu = tf.reshape(mu, [Xnew.shape[0], q_mu.shape[1], Xnew.shape[1]]) # [N, D, d]
-        var = tf.reshape(var, mu.shape)
+        var = tf.reshape(var, mu.shape) # Here should change if full_cov is True
         return mu, var
