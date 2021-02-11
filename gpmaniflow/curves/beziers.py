@@ -18,13 +18,10 @@ class BezierCurve():
         P = tf.concat(values = [tf.expand_dims(self.end_points[0], axis=0), self.control_points, tf.expand_dims(self.end_points[1], axis=0)], axis = 0)
         P = tf.reshape(P, shape = (P.shape[0], P.shape[2]))
         out = tf.matmul(tf.matmul(ts, tf.linalg.diag(self.coeff)),P)
-        # tile O control points ?
-        # sum over O
-        # Should return (T,D)
         return out
     
     def deriv(self, t):
         ''' 
         Returns the derivate dC/dt 
         '''
-                
+        

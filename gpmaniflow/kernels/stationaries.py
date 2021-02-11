@@ -51,6 +51,12 @@ class dSquaredExponential(gpflow.kernels.SquaredExponential):
         out = self.Kronecker(one_by_d, self.K_r2(r2)) * diff #[M,Nd] 
         return out #[M, Nd]
     
+    @dK.register(object, TensorLike, InducingPoints)
+    def _dK(self, X, Z):
+        out = self.dK(self, Z, X)
+        out = out.T
+        return out #[Nd, M]
+    
     def K(self, X1, X2 = None):
         if X2 is None:
             X2 = X1
