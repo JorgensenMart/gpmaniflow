@@ -7,12 +7,13 @@ from gpflow.base import TensorLike
 from gpflow.inducing_variables import InducingPoints
 from gpflow.utilities import Dispatcher
 from gpflow.utilities.ops import difference_matrix
+from gpmaniflow.utils import Kronecker
 
 class dSquaredExponential(gpflow.kernels.SquaredExponential):
     
-    def Kronecker(self, A, B):
-        shape = tf.stack([tf.shape(A)[0] * tf.shape(B)[0], tf.shape(A)[1] * tf.shape(B)[1]])
-        return tf.reshape(tf.expand_dims(tf.expand_dims(A, 1), 3) * tf.expand_dims(tf.expand_dims(B, 0), 2), shape)
+    #def Kronecker(self, A, B):
+    #    shape = tf.stack([tf.shape(A)[0] * tf.shape(B)[0], tf.shape(A)[1] * tf.shape(B)[1]])
+    #    return tf.reshape(tf.expand_dims(tf.expand_dims(A, 1), 3) * tf.expand_dims(tf.expand_dims(B, 0), 2), shape)
     
     def K_diag(self, X):
         return tf.linalg.diag_part(self.K(X)) # This should be more efficient
@@ -35,7 +36,7 @@ class dSquaredExponential(gpflow.kernels.SquaredExponential):
         diff = tf.matmul(diff, -diff, transpose_b = True) # [N, N, d, d] # I THINK ONE DIFF SHOULD BE NEGATIVE
         diff = tf.reshape(diff, [N*d, N*d]) # [Nd, Nd]
 
-        out = self.Kronecker(d_by_d, self.K_r2(r2)) * diff #[Nd,Nd]
+        out = Kronecker(d_by_d, self.K_r2(r2)) * diff #[Nd,Nd]
         return out # [Nd, Nd] (d is input dimensionality)
     
     @dK.register(object, InducingPoints, TensorLike)
@@ -48,13 +49,13 @@ class dSquaredExponential(gpflow.kernels.SquaredExponential):
         diff = difference_matrix(self.scale_sq(Z.Z),self.scale_sq(X)) # [M, N, d]
         diff = tf.reshape(diff, [M, N*d]) # [M, Nd]
 
-        out = self.Kronecker(one_by_d, self.K_r2(r2)) * diff #[M,Nd] 
+        out = Kronecker(one_by_d, self.K_r2(r2)) * diff #[M,Nd] 
         return out #[M, Nd]
     
     @dK.register(object, TensorLike, InducingPoints)
     def _dK(self, X, Z):
         out = self.dK(self, Z, X)
-        out = out.T
+        out = tf.transpose(out)
         return out #[Nd, M]
     
     def K(self, X1, X2 = None):
