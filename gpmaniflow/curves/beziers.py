@@ -1,6 +1,6 @@
 import numpy as np
 import tensorflow as tf
-from utils.utils import bezier_coef
+from gpmaniflow.utils import bezier_coef
 
 class BezierCurve():
     def __init__(self, end_points, order = 1):

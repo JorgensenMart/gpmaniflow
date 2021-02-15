@@ -36,7 +36,7 @@ class dSquaredExponential(gpflow.kernels.SquaredExponential):
         diff = tf.matmul(diff, -diff, transpose_b = True) # [N, N, d, d] # I THINK ONE DIFF SHOULD BE NEGATIVE
         diff = tf.reshape(diff, [N*d, N*d]) # [Nd, Nd]
 
-        out = Kronecker(d_by_d, self.K_r2(r2)) * diff #[Nd,Nd]
+        out = Kronecker(self.K_r2(r2), d_by_d) * diff #[Nd,Nd]
         return out # [Nd, Nd] (d is input dimensionality)
     
     @dK.register(object, InducingPoints, TensorLike)
@@ -49,7 +49,7 @@ class dSquaredExponential(gpflow.kernels.SquaredExponential):
         diff = difference_matrix(self.scale_sq(Z.Z),self.scale_sq(X)) # [M, N, d]
         diff = tf.reshape(diff, [M, N*d]) # [M, Nd]
 
-        out = Kronecker(one_by_d, self.K_r2(r2)) * diff #[M,Nd] 
+        out = Kronecker(self.K_r2(r2), one_by_d) * diff #[M,Nd] 
         return out #[M, Nd]
     
     @dK.register(object, TensorLike, InducingPoints)

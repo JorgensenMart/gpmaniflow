@@ -1,1 +1,1 @@
-from . import interpolators
+from .beziers import BezierCurve
