@@ -84,7 +84,7 @@ class SVGP(SVGP):
         if from_df:
             derivative_kernel = dSquaredExponential(variance = self.kernel.variance,
                                                 lengthscales = self.kernel.lengthscales)
-            self._MatheronSampler = sample_matheron(self.inducing_variable, derivative_kernel, self.q_mu, self.q_sqrt, num_samples = num_samples, num_basis = num_basis)
+            self._MatheronSampler = sample_matheron(self.inducing_variable, derivative_kernel, self.q_mu, q_sqrt = self.q_sqrt, num_samples = num_samples, num_basis = num_basis)
         else:
-            self._MatheronSampler = sample_matheron(self.inducing_variable, self.kernel, self.q_mu, self.q_sqrt, num_samples = num_samples, num_basis = num_basis)
+            self._MatheronSampler = sample_matheron(self.inducing_variable, self.kernel, self.q_mu, q_sqrt = self.q_sqrt, num_samples = num_samples, num_basis = num_basis)
         

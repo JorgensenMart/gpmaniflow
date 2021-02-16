@@ -9,8 +9,8 @@ from gpmaniflow.utils import Kronecker
 
 sample_matheron = Dispatcher("sample_matheron")
 
-@sample_matheron.register(object, SquaredExponential, object, object)
-def _sample_matheron(inducing_variable, kernel, q_mu, q_sqrt, white = True, num_samples = 1, num_basis = 512):
+@sample_matheron.register(object, SquaredExponential, object)
+def _sample_matheron(inducing_variable, kernel, q_mu, q_sqrt = None, likelihood_var = None, white = True, num_samples = 1, num_basis = 512):
     if not isinstance(kernel, SquaredExponential):
         raise NotImplementedError
 
@@ -25,13 +25,25 @@ def _sample_matheron(inducing_variable, kernel, q_mu, q_sqrt, white = True, num_
     #fZ = fZ + tf.sqrt(tf.cast(default_jitter(), tf.float64)) * tf.random.normal(shape=fZ.shape, dtype=fZ.dtype) # for stability
     
     # Update
-    eps = tf.random.normal(shape = [num_samples, q_mu.shape[1], q_mu.shape[0], 1], dtype = q_mu.dtype) # [S, P, M, 1]
-    _u = tf.tile(tf.linalg.adjoint(q_mu)[None, :, :, None], [num_samples, 1,1,1]) +  tf.matmul(tf.tile(q_sqrt[None,:,:,:], [num_samples,1,1,1]), eps)# [S, P, M, 1]
+    #eps = tf.random.normal(shape = [num_samples, q_mu.shape[1], q_mu.shape[0], 1], dtype = q_mu.dtype) # [S, P, M, 1]
+    #_u = tf.tile(tf.linalg.adjoint(q_mu)[None, :, :, None], [num_samples, 1,1,1]) +  tf.matmul(tf.tile(q_sqrt[None,:,:,:], [num_samples,1,1,1]), eps)# [S, P, M, 1]
     
-    Luu = tf.linalg.cholesky(covariances.Kuu(inducing_variable, kernel, jitter=default_jitter())) # [M, M]
-    Luu = tf.tile(Luu[None, None, :, :], [num_samples, q_mu.shape[1],1,1]) # [S, P, M, M]
-    if white:
-        _u = Luu @ _u
+    #Luu = tf.linalg.cholesky(covariances.Kuu(inducing_variable, kernel, jitter=default_jitter())) # [M, M]
+    #Luu = tf.tile(Luu[None, None, :, :], [num_samples, q_mu.shape[1],1,1]) # [S, P, M, M]
+    if q_sqrt is not None:
+        eps = tf.random.normal(shape = [num_samples, q_mu.shape[1], q_mu.shape[0], 1], dtype = q_mu.dtype) # [S, P, M, 1]
+        Luu = tf.linalg.cholesky(covariances.Kuu(inducing_variable, kernel, jitter=default_jitter())) # [M, M]
+        Luu = tf.tile(Luu[None, None, :, :], [num_samples, q_mu.shape[1],1,1]) # [S, P, M, M]
+        _u = tf.tile(tf.linalg.adjoint(q_mu)[None, :, :, None], [num_samples, 1,1,1]) +  tf.matmul(tf.tile(q_sqrt[None,:,:,:], [num_samples,1,1,1]), eps)# [S, P, M, 1]
+        
+        if white:
+            _u = Luu @ _u 
+    else:
+        Luu = tf.linalg.cholesky(covariances.Kuu(inducing_variable, kernel, jitter=likelihood_var))
+        Luu = tf.tile(Luu[None, None, :, :], [num_samples, q_mu.shape[1],1,1]) # [S, P, M, M]
+        _u = tf.tile(tf.linalg.adjoint(q_mu)[None, :, :, None], [num_samples, 1,1,1])# +  tf.matmul(Luu, eps)# [S, P, M, 1]
+        fZ = fZ + tf.sqrt(likelihood_var) * tf.random.normal(shape = fZ.shape, dtype = fZ.dtype)
+
 
     res_upd = tf.linalg.cholesky_solve(Luu, _u - fZ) # [S, P, M, 1]
     def sampler(Xnew):
@@ -42,8 +54,8 @@ def _sample_matheron(inducing_variable, kernel, q_mu, q_sqrt, white = True, num_
         return samples # [S, N, P]
     return sampler
 
-@sample_matheron.register(object, dSquaredExponential, object, object)
-def _sample_matheron(inducing_variable, kernel, q_mu, q_sqrt, white = True, num_samples = 1, num_basis = 512):
+@sample_matheron.register(object, dSquaredExponential, object)
+def _sample_matheron(inducing_variable, kernel, q_mu, q_sqrt = None, likelihood_var = None, white = True, num_samples = 1, num_basis = 512):
 
     # Draw from prior
     bias = tf.random.uniform(shape = [num_basis], maxval=2*np.pi, dtype = q_mu.dtype)
@@ -56,14 +68,19 @@ def _sample_matheron(inducing_variable, kernel, q_mu, q_sqrt, white = True, num_
     #fZ = fZ + tf.sqrt(tf.cast(default_jitter(), tf.float64)) * tf.random.normal(shape=fZ.shape, dtype=fZ.dtype) # for stability
     
     # Update
-    eps = tf.random.normal(shape = [num_samples, q_mu.shape[1], q_mu.shape[0], 1], dtype = q_mu.dtype) # [S, P, M, 1]
-    _u = tf.tile(tf.linalg.adjoint(q_mu)[None, :, :, None], [num_samples, 1,1,1]) +  tf.matmul(tf.tile(q_sqrt[None,:,:,:], [num_samples,1,1,1]), eps)# [S, P, M, 1]
-    
-    Luu = tf.linalg.cholesky(covariances.Kuu(inducing_variable, kernel, jitter=default_jitter())) # [M, M]
-    print(Luu.shape)
-    Luu = tf.tile(Luu[None, None, :, :], [num_samples, q_mu.shape[1],1,1]) # [S, P, M, M]
-    if white:
-        _u = Luu @ _u
+    if q_sqrt is not None:
+        eps = tf.random.normal(shape = [num_samples, q_mu.shape[1], q_mu.shape[0], 1], dtype = q_mu.dtype) # [S, P, M, 1]
+        Luu = tf.linalg.cholesky(covariances.Kuu(inducing_variable, kernel, jitter=default_jitter())) # [M, M]
+        Luu = tf.tile(Luu[None, None, :, :], [num_samples, q_mu.shape[1],1,1]) # [S, P, M, M]
+        _u = tf.tile(tf.linalg.adjoint(q_mu)[None, :, :, None], [num_samples, 1,1,1]) +  tf.matmul(tf.tile(q_sqrt[None,:,:,:], [num_samples,1,1,1]), eps)# [S, P, M, 1]
+        
+        if white:
+            _u = Luu @ _u 
+    else:
+        Luu = tf.linalg.cholesky(covariances.Kuu(inducing_variable, kernel, jitter=likelihood_var))
+        Luu = tf.tile(Luu[None, None, :, :], [num_samples, q_mu.shape[1],1,1]) # [S, P, M, M]
+        _u = tf.tile(tf.linalg.adjoint(q_mu)[None, :, :, None], [num_samples, 1,1,1])# +  tf.matmul(Luu, eps)# [S, P, M, 1]
+        fZ = fZ + tf.sqrt(likelihood_var) * tf.random.normal(shape = fZ.shape, dtype = fZ.dtype)
 
     res_upd = tf.linalg.cholesky_solve(Luu, _u - fZ) # [S, P, M, 1]
     def sampler(Xnew):
