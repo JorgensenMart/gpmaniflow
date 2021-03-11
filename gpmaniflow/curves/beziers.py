@@ -24,4 +24,18 @@ class BezierCurve():
         ''' 
         Returns the derivate dC/dt 
         '''
-        
+        ts = tf.expand_dims(t ** 0 * (1-t) ** (self.order - 1), 1)
+        for i in range(1, self.order): # Can this be done without a for-loop?
+            tsnew = tf.expand_dims(t ** i * (1-t) ** (self.order - 1 - i ), 1)
+            ts = tf.concat(axis = 1, values=[ts, tsnew])
+            print(i)
+        #tsnew = tf.expand_dims(self.order * t ** (self.order - 1),1)
+        #ts = tf.concat(axis = 1, values=[ts, tsnew])
+        P = tf.concat(values = [tf.expand_dims(self.end_points[0], axis=0), self.control_points, tf.expand_dims(self.end_points[1], axis=0)], axis = 0)
+        P = tf.reshape(P, shape = (P.shape[0], P.shape[2]))
+        P = P[1:] - P[:-1]
+        print(P)
+        coeff = tf.constant(bezier_coef(self.order - 1))
+        print(coeff)
+        out = self.order * tf.matmul(tf.matmul(ts, tf.linalg.diag(coeff)),P)
+        return out
