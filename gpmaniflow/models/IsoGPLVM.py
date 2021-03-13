@@ -1,4 +1,5 @@
 import tensorflow as tf
+import numpy as np
 from typing import Optional
 
 from gpflow.models.training_mixins import InputData, OutputData, InternalDataTrainingLossMixin
@@ -10,8 +11,10 @@ from gpflow.utilities.ops import pca_reduce, square_distance
 
 from gpmaniflow.models import SVGP, GPR
 from gpmaniflow.kernels import dSquaredExponential
+from gpmaniflow.likelihoods import Nakagami
 from gpmaniflow.conditionals import conditional
 from gpmaniflow.samplers import sample_matheron, initialize_sampler
+from gpmaniflow.curves import BezierCurve
 
 class IsoGPLVM(GPR):
     def __init__(
@@ -62,13 +65,32 @@ class IsoGPLVM(GPR):
         return self.log_marginal_likelihood()
     
     def log_marginal_likelihood(self) -> tf.Tensor:
+        X = self.data[1]
         # Sample draws from the Jacobian using Matheron
-        self.MatheronSampler = initialize_sampler(from_df = True) # Initialize a Matheron sampler.
-        # Compute curve-lengths 
+        self.MatheronSampler = initialize_sampler(from_df = True, num_samples = 50) # Initialize a Matheron sampler.
+        # Reshape data from [N,d] -> [N*(N-1)/2,2,1,d] # All pairwise points
+        I = range(len(X))
+        out1, out2 = tf.meshgrid(I,tf.transpose(I))
+        out = tf.concat([tf.reshape(out2,(-1,1)),tf.reshape(out1,(-1,1))],axis=-1)
+        out = out[out[:,0] < out[:, 1]]
+        pX = tf.expand_dims(tf.gather(X, out), 2) #All pairwise points
+        # Compute curve-lengths
+        def curve_length(x1_and_x2):
+            C = BezierCurve(x1_and_x2)
+            t = np.linspace(0,1, 20) # Consider throwing away the last index!
+            J = self.MatheronSampler(C(t)) # [S, t, d, D]
+            J = tf.transpose(J, perm = [0,1,3,2]) #[S, t, D, d]
+            res = J @ tf.expand_dims(C.deriv(t), axis= 2) # [S, t, D, 1]
+            res = tf.norm(res, axis = [-2,-1]) # [S, t]
+            res = tf.reduce_mean(res, axis = 1)
+            return res # S
+        curve_lengths = tf.map_fn(pX, curve_length) # [N*(N-1)/2, S]
         # Estimate relevant Nakgami parameters
-        
+        Omega = tf.reduce_mean(tf.square(curve_lengths), axis = 1) #[N*(N-1)/2]
+        m = tf.square(Omega) / (tf.reduce_mean(tf.square(tf.square(curve_lengths)), axis = 1) - Omega ** 2)
+        m_and_Omega = tf.transpose(tf.stack([m, Omega]))
         # Compute Nakagami likelihood
-
+        return Nakagami(tf.gather_nd(self.proximity_data, I), m_and_Omega)
 
 #class BayesianIsoGPLVM(SVGP, InternalDataTrainingLossMixin):
 #    def __init__(
