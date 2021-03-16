@@ -10,7 +10,14 @@ from gpflow.utilities.ops import difference_matrix
 from gpmaniflow.utils import Kronecker
 
 class dSquaredExponential(gpflow.kernels.SquaredExponential):
-    
+    def __init__(self, variance=1.0, lengthscales=1.0, eager_execution=True, **kwargs):
+        if eager_execution:
+            super().__init__(variance=variance, lengthscales=lengthscales, **kwargs) # New variables are initialized
+        else:
+            self.variance = variance
+            self.lengthscales = lengthscales
+            #self._validate_ard_active_dims(self.lengthscales)
+
     #def Kronecker(self, A, B):
     #    shape = tf.stack([tf.shape(A)[0] * tf.shape(B)[0], tf.shape(A)[1] * tf.shape(B)[1]])
     #    return tf.reshape(tf.expand_dims(tf.expand_dims(A, 1), 3) * tf.expand_dims(tf.expand_dims(B, 0), 2), shape)

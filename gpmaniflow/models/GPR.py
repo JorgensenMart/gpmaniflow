@@ -29,7 +29,7 @@ class GPR(GPR):
     def predict_df(self, Xnew: InputData, full_cov=False, full_output_cov=False):
         # Create derivative kernel
         derivative_kernel = dSquaredExponential(variance = self.kernel.variance,
-                                                lengthscales = self.kernel.lengthscales)
+                                                lengthscales = self.kernel.lengthscales, eager_execution=False)
          
         X, Y = self.data
         
@@ -52,12 +52,11 @@ class GPR(GPR):
     
     @MatheronSampler.setter
     def MatheronSampler(self, initializer):
-        print("I'm here")
         from_df, num_samples, num_basis = initializer
         if from_df:
             X, Y = self.data
             derivative_kernel = dSquaredExponential(variance = self.kernel.variance,
-                                                lengthscales = self.kernel.lengthscales)
+                                                lengthscales = self.kernel.lengthscales, eager_execution=False)
             
             self._MatheronSampler = sample_matheron(InducingPoints(X), derivative_kernel, Y, likelihood_var = self.likelihood.variance,
                                                     num_samples = num_samples, num_basis = num_basis)

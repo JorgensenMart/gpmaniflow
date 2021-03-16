@@ -1,5 +1,4 @@
 import tensorflow as tf
-import numpy as np
 from typing import Optional
 
 from gpflow.models.training_mixins import InputData, OutputData, InternalDataTrainingLossMixin
@@ -8,6 +7,7 @@ from gpflow.kernels import Kernel, SquaredExponential
 from gpflow.mean_functions import MeanFunction, Zero
 from gpflow.base import Parameter
 from gpflow.utilities.ops import pca_reduce, square_distance
+from gpflow.config import default_float
 
 from gpmaniflow.models import SVGP, GPR
 from gpmaniflow.kernels import dSquaredExponential
@@ -22,6 +22,7 @@ class IsoGPLVM(GPR):
         data: OutputData,
         latent_dim: int,
         proximity_data: Optional[tf.Tensor] = None, # The non-Bayesian Iso-GPLVM >>needs<< the embedding, proximity is optional.
+        censoring: Optional[tf.Tensor] = None, # The right censoring value
         X_data_mean: Optional[tf.Tensor] = None,
         kernel: Optional[Kernel] = None,
         mean_function: Optional[MeanFunction] = None,
@@ -35,14 +36,19 @@ class IsoGPLVM(GPR):
         :param kernel: kernel specification, by default Squared Exponential
         :param mean_function: mean function, by default None.
         """
-        if X_data_mean is None:
-            X_data_mean = pca_reduce(data, latent_dim)
+
         
         if proximity_data is None:
             """
             If proximity data is not given, the Euclidean distances of the embeddings are used.
             """
             proximity_data = tf.sqrt(square_distance(data,data))
+        self.proximity_data = proximity_data
+        self.iso_likelihood = Nakagami(rcl = censoring)
+        
+        if X_data_mean is None:
+            X_data_mean = pca_reduce(data, latent_dim)
+        self.X_data_mean = Parameter(X_data_mean)      
             
         num_latent_gps = X_data_mean.shape[1]
         if num_latent_gps != latent_dim:
@@ -58,7 +64,7 @@ class IsoGPLVM(GPR):
         if data.shape[1] < num_latent_gps:
             raise ValueError("More latent dimensions than observed.")
 
-        gpr_data = (Parameter(X_data_mean), data_input_to_tensor(data))
+        gpr_data = (self.X_data_mean, data_input_to_tensor(data))
         super().__init__(gpr_data, kernel, mean_function=mean_function)
     
     def maximum_log_likelihood_objective(self) -> tf.Tensor:
@@ -67,30 +73,32 @@ class IsoGPLVM(GPR):
     def log_marginal_likelihood(self) -> tf.Tensor:
         X = self.data[1]
         # Sample draws from the Jacobian using Matheron
-        self.MatheronSampler = initialize_sampler(from_df = True, num_samples = 50) # Initialize a Matheron sampler.
+        self.MatheronSampler = initialize_sampler(from_df = True, num_samples = 30) # Initialize a Matheron sampler.
         # Reshape data from [N,d] -> [N*(N-1)/2,2,1,d] # All pairwise points
-        I = range(len(X))
+        I = tf.range(0, len(X))
+        #I = tf.constant(I)
         out1, out2 = tf.meshgrid(I,tf.transpose(I))
         out = tf.concat([tf.reshape(out2,(-1,1)),tf.reshape(out1,(-1,1))],axis=-1)
         out = out[out[:,0] < out[:, 1]]
-        pX = tf.expand_dims(tf.gather(X, out), 2) #All pairwise points
+        pX = tf.expand_dims(tf.gather(self.X_data_mean, out), 2) #All pairwise points
         # Compute curve-lengths
+        @tf.function
         def curve_length(x1_and_x2):
             C = BezierCurve(x1_and_x2)
-            t = np.linspace(0,1, 20) # Consider throwing away the last index!
+            t = tf.linspace(0.0,1, 10) # Consider throwing away the last index!
             J = self.MatheronSampler(C(t)) # [S, t, d, D]
             J = tf.transpose(J, perm = [0,1,3,2]) #[S, t, D, d]
             res = J @ tf.expand_dims(C.deriv(t), axis= 2) # [S, t, D, 1]
             res = tf.norm(res, axis = [-2,-1]) # [S, t]
             res = tf.reduce_mean(res, axis = 1)
             return res # S
-        curve_lengths = tf.map_fn(pX, curve_length) # [N*(N-1)/2, S]
+        curve_lengths = tf.map_fn(curve_length, pX, fn_output_signature = pX.dtype) # [N*(N-1)/2, S]
         # Estimate relevant Nakgami parameters
         Omega = tf.reduce_mean(tf.square(curve_lengths), axis = 1) #[N*(N-1)/2]
         m = tf.square(Omega) / (tf.reduce_mean(tf.square(tf.square(curve_lengths)), axis = 1) - Omega ** 2)
-        m_and_Omega = tf.transpose(tf.stack([m, Omega]))
+        m_and_Omega = tf.stack([m, Omega])
         # Compute Nakagami likelihood
-        return Nakagami(tf.gather_nd(self.proximity_data, I), m_and_Omega)
+        return self.iso_likelihood.log_prob(m_and_Omega, tf.gather_nd(self.proximity_data, out))
 
 #class BayesianIsoGPLVM(SVGP, InternalDataTrainingLossMixin):
 #    def __init__(

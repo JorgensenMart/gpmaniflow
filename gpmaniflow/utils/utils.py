@@ -1,5 +1,6 @@
 import numpy as np
 import tensorflow as tf
+from gpflow.config import default_float
  
 def factorial(n):
     return np.prod(range(1,n+1))

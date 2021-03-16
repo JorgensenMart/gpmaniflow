@@ -84,7 +84,7 @@ def _sample_matheron(inducing_variable, kernel, q_mu, q_sqrt = None, likelihood_
 
     res_upd = tf.linalg.cholesky_solve(Luu, _u - fZ) # [S, P, M, 1]
     def sampler(Xnew):
-        phiX = - tf.sqrt(kernel.variance * 2 / num_basis) * tf.divide(tf.transpose(spectrum), kernel.lengthscales) #[d, num_basis]
+        phiX = - tf.sqrt(kernel.variance * 2 / num_basis) * tf.transpose(tf.divide(spectrum, kernel.lengthscales)) #[d, num_basis]
         phiX = Kronecker(tf.ones([Xnew.shape[0], 1], dtype = default_float()), phiX) #[Nd, num_basis]
         phiX = phiX * Kronecker(tf.sin(tf.matmul(tf.divide(Xnew,kernel.lengthscales), spectrum, transpose_b = True) + bias),tf.ones([Xnew.shape[1], 1], dtype = default_float()))
 
