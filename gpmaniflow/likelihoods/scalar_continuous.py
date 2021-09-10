@@ -23,7 +23,7 @@ class Nakagami(ScalarLikelihood):
         def logpdf(x, m_and_Omega):
             m = m_and_Omega[0]
             Omega = m_and_Omega[1]
-            return - tf.math.lgamma(m) - m * tf.math.log(Omega/m) + 2*m - tf.math.log(x) - tf.square(x) * m / Omega
+            return tf.log(2) - tf.math.lgamma(m) - m * tf.math.log(Omega/m) + (2*m - 1)*tf.math.log(x) - tf.square(x) * m / Omega
         
         func = lambda a: tf.cond(tf.math.less(a[0],self.rcl), lambda: logpdf(a[0], a[1]), lambda: log_tail(self.rcl, a[1])) # This only considers right-censoring.
         res = tf.map_fn(func, (Y, tf.transpose(m_and_Omega)), dtype = Y.dtype)
