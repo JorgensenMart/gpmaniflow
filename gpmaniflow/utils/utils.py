@@ -5,6 +5,9 @@ from gpflow.config import default_float
 def factorial(n):
     return np.prod(range(1,n+1))
 
+def binomial_coef(n, i):
+    return factorial(n) / (factorial(i) * factorial(n-i))
+
 def bezier_coef(n):
     k = np.ones(n+1)
     nk = np.ones(n+1)

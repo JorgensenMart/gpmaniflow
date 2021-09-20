@@ -79,7 +79,6 @@ class SVGP(SVGP):
     
     @MatheronSampler.setter
     def MatheronSampler(self, initializer):
-        print("I'm here")
         from_df, num_samples, num_basis = initializer
         if from_df:
             derivative_kernel = dSquaredExponential(variance = self.kernel.variance,
