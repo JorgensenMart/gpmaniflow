@@ -1,6 +1,7 @@
 import tensorflow as tf
 from gpflow.models import SVGP
 from gpflow.models.model import InputData
+
 from gpmaniflow.kernels import dSquaredExponential
 from gpmaniflow.conditionals import conditional
 from gpmaniflow.samplers import sample_matheron
