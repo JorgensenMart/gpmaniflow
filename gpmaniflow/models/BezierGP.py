@@ -5,11 +5,12 @@ from gpflow.models import BayesianModel
 from gpflow.config import default_float
 from gpflow.models.model import InputData, RegressionData
 from gpflow.likelihoods import Likelihood
+from gpflow.models.training_mixins import ExternalDataTrainingLossMixin
 
 from gpmaniflow.surfaces import BernsteinPolynomial, ControlPoints#, AmortisedControlPoints
 from gpmaniflow.utils import GetAllListPairs
 
-class BezierProcess(BayesianModel): # Where should we inherit from?
+class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin): # Where should we inherit from?
     '''
     Implementation of a Bezier Stochastic Process. 
     '''
@@ -19,12 +20,16 @@ class BezierProcess(BayesianModel): # Where should we inherit from?
             likelihood: Likelihood, # Testing phase.
             order = 1,
             output_dim =1,
-            amortize = False
+            amortize = False,
+            num_data = None
             ):
         super().__init__()
         self.input_dim = input_dim
         self.order = order
         self.output_dim = output_dim
+        self.num_data = num_data # Important to set when using minibatches
+        self.likelihood = likelihood
+
         self.B = BernsteinPolynomial(self.order)
         if not amortize:
             self.P = ControlPoints(input_dim = self.input_dim, output_dim = self.output_dim, orders = self.order)
@@ -36,8 +41,17 @@ class BezierProcess(BayesianModel): # Where should we inherit from?
         return self.elbo(data)
 
     def elbo(self, data: RegressionData) -> tf.Tensor:
-        #X, Y = data
-        raise NotImplementedError
+        X, Y = data
+        
+        f_mean, f_var = self.predict_f(X)
+        var_exp = self.likelihood.variational_expectations(f_mean, f_var, Y)
+       
+        if self.num_data == None:
+            scale = 1
+        else:
+            scale = tf.cast(self.num_data, var_exp.dtype) / tf.cast(tf.shape(X)[0], var_exp.dtype)
+       
+        return scale * tf.reduce_sum(var_exp) - tf.reduce_sum(self.P.kl_divergence()) 
 
     def predict_f(self, Xnew: InputData):       
         assert Xnew.shape[1] == self.input_dim

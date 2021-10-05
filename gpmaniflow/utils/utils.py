@@ -1,12 +1,18 @@
 import numpy as np
+from scipy.special import factorial as scipyfac
 import tensorflow as tf
 from gpflow.config import default_float
  
 def factorial(n):
-    return np.prod(range(1,n+1))
+    #print(scipyfac(n))
+    return scipyfac(n) # scipy factorial handles arrays
+    #return np.prod(range(1,n+1))
 
 def binomial_coef(n, i):
-    return factorial(n) / (factorial(i) * factorial(n-i))
+    #print(n)
+    #print(i)
+    #ni = n - i
+    return factorial(n) / (factorial(i) * factorial(n - i))
 
 def bezier_coef(n):
     k = np.ones(n+1)
