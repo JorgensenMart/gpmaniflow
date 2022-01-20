@@ -97,8 +97,11 @@ if __name__ == '__main__':
     #out = P.nn(np.array([[1]]))
     #print(out)
     B = BernsteinPolynomial(orders = 10)
-    b_out = B(tf.constant([[0.6, 0.5, 0.4], [0.6, 0.5, 0.4]], dtype = default_float() ))
-    print(b_out)
+    b_out = B(tf.constant([[0.6, 0.5, 0.4], [0.3, 0.9, 0.4]], dtype = default_float() ))
+    print(b_out) # [N, d, B]
+    I = tf.constant([[[0, 0, 0]], [[1, 1, 1]]])
+    print(I.shape)
+    print(tf.gather(b_out,I, axis = 2, batch_dims = 1))
     print(tf.reduce_sum(b_out, axis = 2))
 #if __name__ == '__main__':
     

@@ -9,7 +9,7 @@ from gpflow.likelihoods import Likelihood
 from gpflow.models.training_mixins import ExternalDataTrainingLossMixin
 
 from gpmaniflow.surfaces import BernsteinPolynomial, ControlPoints, AmortisedControlPoints
-from gpmaniflow.utils import GetAllListPairs, GetNearGridPoints
+from gpmaniflow.utils import GetAllListPairs, GetNearGridPoints, GetNearGridPoints2
 
 class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin): # Where should we inherit from?
     '''
@@ -79,7 +79,7 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin): # Where shoul
         if not self.amortise:
             I = GetAllListPairs(self.order+1,self.input_dim) 
             outB = self.B(Xnew)
-            outB = tf.gather(outB, I, axis = 2)
+            outB = tf.gather(outB, I, axis = 2) # [N, d, (order + 1)^d, d]
             outB = tf.linalg.diag_part(tf.transpose(outB, perm = (0,2,1,3) )) # [N, (order + 1)^d, d]
             outB = tf.reduce_prod(outB, axis = 2) # [N, (order + 1)^d]
             P_mean = tf.gather_nd(self.P.variational_posteriors.loc, I)
@@ -116,25 +116,36 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin): # Where shoul
                     I2 = tf.floor(I2) + 1
                     global_I = tf.concat([I2, I0], 0)
                 
-                
 
-                local_f_mean, local_f_var, sumBfm, sumBfv, sumBfvTotal = tf.map_fn(self.low_variance_predict_f, Xnew, fn_output_signature = (
-                    default_float(),
-                    default_float(),
-                    default_float(),
-                    default_float(),
-                    default_float()))
-                
-                local_f_mean = tf.squeeze(local_f_mean, axis = 1)
-                local_f_var = tf.squeeze(local_f_var, axis = 1)
-                sumBfm = tf.expand_dims(sumBfm, axis = 1)
-                sumBfv = tf.expand_dims(sumBfv, axis = 1)
-                sumBfvTotal = tf.expand_dims(sumBfvTotal, axis = 1)
                 if outB is None:
-                    outB = self.B(Xnew) #Here we should implement minibatch in B, rather than gather
+                    outB = self.B(Xnew) # [N, d, (order + 1)]
+                
+                sumBfvTotal = tf.reduce_sum(tf.reduce_prod(outB ** 2, axis = 1), axis = 1)
+
+                local_I = GetNearGridPoints2(Xnew, order = self.order, d = self.input_dim, n = 100) # [N, n, d]
+                # CAN THIS FUNCTION NOT HAVE KNOWN SHAPE WHEN CONSTRUCTING THE GRAPH
+                local_outB = tf.gather(outB, tf.cast(local_I, dtype = tf.int32), 
+                        axis = 2, batch_dims = 1)
+                local_outB = tf.linalg.diag_part(tf.transpose(local_outB, perm = (0,2,1,3) ))
+                local_outB = tf.reduce_prod(local_outB, axis = 2) # [N, n]
+                local_outB = tf.expand_dims(local_outB, axis = 1) # Only for matmul
+                
+                sumBfm = tf.reduce_sum(local_outB, axis = 2)
+                sumBfv = tf.reduce_sum(local_outB ** 2, axis = 2)
+                
+                local_amP = tf.map_fn(lambda x: self.P.nn(x), local_I / self.order) # [N, n, out_dim, 2]
+                # IS THERE A MORE EFFICIENT WAY HERE
+                local_P_mean = local_amP[:,:,:,0] # [N, n, out_dim]
+                local_P_var = tf.exp(local_amP[:,:,:,1]) # [N, n, out_dim]
+                
+                local_f_mean = tf.squeeze(tf.matmul(local_outB, local_P_mean), axis = 1)
+                local_f_var = tf.squeeze(tf.matmul(local_outB ** 2, local_P_var), axis = 1)
+
                 outB = tf.gather(outB, tf.cast(global_I, dtype = tf.int32), axis = 2)
                 outB = tf.linalg.diag_part(tf.transpose(outB, perm = (0,2,1,3) ))
                 outB = tf.reduce_prod(outB, axis = 2) # [N, B]
+                
+                sumBfvTotal = tf.expand_dims(sumBfvTotal, axis = 1)
                 
                 global_sumBfm = tf.reduce_sum(outB, axis = 1, keepdims = True) # [N, 1]
                 global_sumBfv = tf.reduce_sum(outB ** 2, axis = 1, keepdims = True) # [N, 1]
@@ -144,6 +155,7 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin): # Where shoul
                 
                 global_f_mean = tf.matmul(outB, P_mean) # [N, out_dim]
                 global_f_var = tf.matmul(outB ** 2, P_var) # Here we dont square P_var
+                
                 f_mean = local_f_mean + (1 - sumBfm)/global_sumBfm * global_f_mean
                 f_var = local_f_var + (sumBfvTotal - sumBfv) / global_sumBfv * global_f_var
         return f_mean, f_var
