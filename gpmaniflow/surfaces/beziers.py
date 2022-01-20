@@ -28,8 +28,35 @@ class ControlPoints(Module):
     def kl_divergence(self):
         return tfp.distributions.kl_divergence(self.variational_posteriors, self.priors)
 
-class AmortisedControlPoints(ControlPoints):
-    pass
+class AmortisedControlPoints(Module):
+    def __init__(self, input_dim, output_dim = 1, orders = 1, nn = None, batch_size = None):
+        self.num_points = (orders + 1) ** input_dim
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.orders = orders
+        
+        if nn == None:
+            self.nn = vanilla_mlp(self.input_dim, self.output_dim) # This should be implemented for several output dims
+        else:
+            self.nn = nn
+        self.nn.build()
+        if batch_size is None:
+            self.batch_size = min(2000, self.num_points)
+        else:
+            self.batch_size = batch_size
+    
+    def forward(self, mini_batch):
+        return self.nn(mini_batch) # [B, P, n_params]   
+    
+    def kl_divergence(self, mini_batch):
+        amP = self.nn(mini_batch)
+        var_approx = tfp.distributions.Normal(loc = amP[:,:,0], scale = tf.exp(amP[:,:,1]))
+        out_shape = tf.shape(var_approx.loc)
+        return tfp.distributions.kl_divergence(
+                var_approx,
+                tfp.distributions.Normal(loc = tf.zeros(out_shape, dtype = default_float()), scale = tf.ones(out_shape, dtype = default_float())))
+
+    #pass
 
 
 class BernsteinPolynomial():
@@ -48,23 +75,38 @@ class BernsteinPolynomial():
             X1 = tf.math.pow(Xnew, range(O))
             X2 = tf.math.pow(1. - Xnew, np.array(self.orders) - range(O))
             B_out = X1 * X2 * binom(np.array(self.orders), range(O))
-            #print(B_out)
-            #B_out = tf.zeros([Xnew.shape[0],Xnew.shape[1],O], dtype = default_float())
-            #print(B_out)
-            #TODO: Avoid this Variable construction!
-            #B_out = tf.Variable(B_out) # TensorFlow only can assign on variable.
-            #for i in range(O): #TODO: Avoid this loop.
-            #    B_out[...,i].assign( Xnew ** i * (1-Xnew) ** (self.orders-i) * binom(np.array(self.orders), i) )
-            #B_out = tf.convert_to_tensor(B_out) # Not a Variable anymore.
             return B_out
 
+def vanilla_mlp(input_dim, output_dim):
+    mlp = tf.keras.Sequential([
+            tf.keras.Input(shape = (input_dim,)),
+            tf.keras.layers.Dense(input_dim),
+            tf.keras.layers.Dense(30, activation = "relu"),
+            tf.keras.layers.Dense(30, activation = "relu"),
+            #tf.keras.layers.Dense(30, activation = "relu"),
+            #tf.keras.layers.Dense(48, activation = "relu"), 
+            tf.keras.layers.Dense(2 * output_dim),
+            tf.keras.layers.Reshape((output_dim, 2)),
+            tf.keras.layers.Lambda(lambda x: tf.cast(x,  default_float()))
+            ])
+    return mlp
+
 if __name__ == '__main__':
+    #P = AmortisedControlPoints(input_dim = 1)
+    #print(P.nn)
+    #out = P.nn(np.array([[1]]))
+    #print(out)
+    B = BernsteinPolynomial(orders = 10)
+    b_out = B(tf.constant([[0.6, 0.5, 0.4], [0.6, 0.5, 0.4]], dtype = default_float() ))
+    print(b_out)
+    print(tf.reduce_sum(b_out, axis = 2))
+#if __name__ == '__main__':
     
-    B = BernsteinPolynomial(orders = 5)
-    X = tf.constant([[0], [1]], dtype = default_float())
-    #print(X)
-    B_out = B(X)
-    print(B_out)
+#    B = BernsteinPolynomial(orders = 5)
+#    X = tf.constant([[0], [1]], dtype = default_float())
+#    #print(X)
+#    B_out = B(X)
+#    print(B_out)
     
  #   I = tf.range(0,B.orders+1)
   #  print(I)
