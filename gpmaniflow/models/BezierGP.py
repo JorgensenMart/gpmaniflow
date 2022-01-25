@@ -57,7 +57,7 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin): # Where shoul
             global_I = tf.concat([I2, I0], 0)
             kl = self.P.num_points * tf.reduce_mean(self.P.kl_divergence(global_I / self.order))
             #kl = 0
-            f_mean, f_var = self.predict_f(X)
+            f_mean, f_var = self.predict_f(X, approx = True)
             #print(f_mean)
             #print(f_var)
         else:
@@ -73,12 +73,13 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin): # Where shoul
         
         return scale * tf.reduce_sum(var_exp) - kl 
 
-    def predict_f(self, Xnew: InputData, I = None, pi = None, approx = True, outB = None):       
+    def predict_f(self, Xnew: InputData, I = None, pi = None, approx = False, outB = None):       
         assert Xnew.shape[1] == self.input_dim
         
         if not self.amortise:
             I = GetAllListPairs(self.order+1,self.input_dim) 
             outB = self.B(Xnew)
+            #print(I)
             outB = tf.gather(outB, I, axis = 2) # [N, d, (order + 1)^d, d]
             outB = tf.linalg.diag_part(tf.transpose(outB, perm = (0,2,1,3) )) # [N, (order + 1)^d, d]
             outB = tf.reduce_prod(outB, axis = 2) # [N, (order + 1)^d]
@@ -89,14 +90,24 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin): # Where shoul
         
         if self.amortise:
             if approx is False:
+                # PROBABLY THROW WARNING IF MANY CONTROL POINTS
                 I = tf.data.Dataset.from_tensor_slices(
                         (GetAllListPairs(self.order+1, self.input_dim)))
-                outB = self.B(Xnew)
+                OutB = self.B(Xnew)
                 f_mean = f_var = tf.zeros(shape = [Xnew.shape[0], self.output_dim], dtype = default_float())
                 iterator = iter(I.batch(self.P.batch_size))
                 for batch in iterator:
-                    #print(batch)
-                    batch_f_mean, batch_f_var = self.predict_f(Xnew, I = batch, approx = True, outB = outB)
+                    outB = tf.gather(OutB, batch, axis = 2)
+                    outB = tf.linalg.diag_part(tf.transpose(outB, perm = (0,2,1,3) ))
+                    outB = tf.reduce_prod(outB, axis = 2) # [N, B]
+                    
+                    amP = self.P.nn(batch / self.order)
+                    P_mean = amP[:,:,0]
+                    P_var = tf.exp(amP[:,:,1])
+                    
+                    batch_f_mean = tf.matmul(outB, P_mean)
+                    batch_f_var = tf.matmul(outB ** 2, P_var)
+
                     f_mean += batch_f_mean
                     f_var += batch_f_var
 
@@ -132,8 +143,9 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin): # Where shoul
                 
                 sumBfm = tf.reduce_sum(local_outB, axis = 2)
                 sumBfv = tf.reduce_sum(local_outB ** 2, axis = 2)
-                
+                print(local_I.shape)
                 local_amP = tf.map_fn(lambda x: self.P.nn(x), local_I / self.order) # [N, n, out_dim, 2]
+                print(local_amP.shape)
                 # IS THERE A MORE EFFICIENT WAY HERE
                 local_P_mean = local_amP[:,:,:,0] # [N, n, out_dim]
                 local_P_var = tf.exp(local_amP[:,:,:,1]) # [N, n, out_dim]
