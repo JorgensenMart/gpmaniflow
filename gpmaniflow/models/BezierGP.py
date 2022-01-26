@@ -58,8 +58,6 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin): # Where shoul
             kl = self.P.num_points * tf.reduce_mean(self.P.kl_divergence(global_I / self.order))
             #kl = 0
             f_mean, f_var = self.predict_f(X, approx = True)
-            #print(f_mean)
-            #print(f_var)
         else:
             kl = tf.reduce_sum(self.P.kl_divergence())
             f_mean, f_var = self.predict_f(X)
@@ -79,7 +77,6 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin): # Where shoul
         if not self.amortise:
             I = GetAllListPairs(self.order+1,self.input_dim) 
             outB = self.B(Xnew)
-            #print(I)
             outB = tf.gather(outB, I, axis = 2) # [N, d, (order + 1)^d, d]
             outB = tf.linalg.diag_part(tf.transpose(outB, perm = (0,2,1,3) )) # [N, (order + 1)^d, d]
             outB = tf.reduce_prod(outB, axis = 2) # [N, (order + 1)^d]
@@ -103,10 +100,10 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin): # Where shoul
                     
                     amP = self.P.nn(batch / self.order)
                     P_mean = amP[:,:,0]
-                    P_var = tf.exp(amP[:,:,1])
+                    P_var = tf.math.softplus(amP[:,:,1]) + 1e-3 # Std dev
                     
                     batch_f_mean = tf.matmul(outB, P_mean)
-                    batch_f_var = tf.matmul(outB ** 2, P_var)
+                    batch_f_var = tf.matmul(outB ** 2, P_var ** 2)
 
                     f_mean += batch_f_mean
                     f_var += batch_f_var
@@ -131,9 +128,10 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin): # Where shoul
                 if outB is None:
                     outB = self.B(Xnew) # [N, d, (order + 1)]
                 
-                sumBfvTotal = tf.reduce_sum(tf.reduce_prod(outB ** 2, axis = 1), axis = 1)
+                #sumBfvTotal = tf.reduce_sum(tf.reduce_prod(outB ** 2, axis = 1), axis = 1)
+                sumBfvTotal = tf.reduce_prod(tf.reduce_sum(outB ** 2, axis = 2), axis = 1)
 
-                local_I = GetNearGridPoints2(Xnew, order = self.order, d = self.input_dim, n = 100) # [N, n, d]
+                local_I = GetNearGridPoints2(Xnew, order = self.order, d = self.input_dim, n = 200) # [N, n, d]
                 # CAN THIS FUNCTION NOT HAVE KNOWN SHAPE WHEN CONSTRUCTING THE GRAPH
                 local_outB = tf.gather(outB, tf.cast(local_I, dtype = tf.int32), 
                         axis = 2, batch_dims = 1)
@@ -141,33 +139,35 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin): # Where shoul
                 local_outB = tf.reduce_prod(local_outB, axis = 2) # [N, n]
                 local_outB = tf.expand_dims(local_outB, axis = 1) # Only for matmul
                 
-                sumBfm = tf.reduce_sum(local_outB, axis = 2)
-                sumBfv = tf.reduce_sum(local_outB ** 2, axis = 2)
-                print(local_I.shape)
-                local_amP = tf.map_fn(lambda x: self.P.nn(x), local_I / self.order) # [N, n, out_dim, 2]
-                print(local_amP.shape)
-                # IS THERE A MORE EFFICIENT WAY HERE
-                local_P_mean = local_amP[:,:,:,0] # [N, n, out_dim]
-                local_P_var = tf.exp(local_amP[:,:,:,1]) # [N, n, out_dim]
-                
-                local_f_mean = tf.squeeze(tf.matmul(local_outB, local_P_mean), axis = 1)
-                local_f_var = tf.squeeze(tf.matmul(local_outB ** 2, local_P_var), axis = 1)
+                sumBfm = tf.reduce_sum(local_outB, axis = 2) # [N, 1]
+                sumBfv = tf.reduce_sum(local_outB ** 2, axis = 2) # [N, 1]
+                local_amP = tf.map_fn(lambda x: self.P.nn(x), local_I / self.order) # [N, n, out_dim, 2] # IS THERE A MORE EFFICIENT WAY HERE
 
-                outB = tf.gather(outB, tf.cast(global_I, dtype = tf.int32), axis = 2)
-                outB = tf.linalg.diag_part(tf.transpose(outB, perm = (0,2,1,3) ))
-                outB = tf.reduce_prod(outB, axis = 2) # [N, B]
+                local_P_mean = local_amP[:,:,:,0] # [N, n, out_dim]
+                local_P_var = tf.math.softplus(local_amP[:,:,:,1]) + 1e-3 # [N, n, out_dim] # Std dev
+                
+                local_f_mean = tf.squeeze(tf.matmul(local_outB, local_P_mean), axis = 1) # [N, out_dim]
+                local_f_var = tf.squeeze(tf.matmul(local_outB ** 2, local_P_var ** 2), axis = 1) 
+
+                global_outB = tf.gather(outB, tf.cast(global_I, dtype = tf.int32), axis = 2)
+                global_outB = tf.linalg.diag_part(tf.transpose(global_outB, perm = (0,2,1,3) ))
+                global_outB = tf.reduce_prod(global_outB, axis = 2) # [N, B]
                 
                 sumBfvTotal = tf.expand_dims(sumBfvTotal, axis = 1)
                 
-                global_sumBfm = tf.reduce_sum(outB, axis = 1, keepdims = True) # [N, 1]
-                global_sumBfv = tf.reduce_sum(outB ** 2, axis = 1, keepdims = True) # [N, 1]
+                global_sumBfm = tf.reduce_sum(global_outB, axis = 1, keepdims = True) # [N, 1]
+                global_sumBfv = tf.reduce_sum(global_outB ** 2, axis = 1, keepdims = True) # [N, 1]
                 amP = self.P.nn(global_I / self.order) # nn forward pass
                 P_mean = amP[:,:,0] # [B, out_dim]
-                P_var = tf.exp(amP[:,:,1]) # [B, out_dim]
+                P_var = tf.math.softplus(amP[:,:,1]) + 1e-3 # [B, out_dim] # Std dev
                 
-                global_f_mean = tf.matmul(outB, P_mean) # [N, out_dim]
-                global_f_var = tf.matmul(outB ** 2, P_var) # Here we dont square P_var
-                
+                global_f_mean = tf.matmul(global_outB, P_mean) # [N, out_dim]
+                global_f_var = tf.matmul(global_outB ** 2, P_var ** 2) # Here we dont square P_var
+                #print(sumBfm) 
+                #print(sumBfv)
+                #print(global_sumBfm)
+                #print(sumBfvTotal - sumBfv)
+                #print(global_sumBfv)
                 f_mean = local_f_mean + (1 - sumBfm)/global_sumBfm * global_f_mean
                 f_var = local_f_var + (sumBfvTotal - sumBfv) / global_sumBfv * global_f_var
         return f_mean, f_var
