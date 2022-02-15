@@ -34,6 +34,8 @@ class AmortisedControlPoints(Module):
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.orders = orders
+        # test
+        #self.prior_scale = Parameter(value = 1, dtype = default_float(), transform = positive())
         
         if nn == None:
             self.nn = vanilla_mlp(self.input_dim, self.output_dim) # This should be implemented for several output dims
@@ -50,7 +52,8 @@ class AmortisedControlPoints(Module):
     
     def kl_divergence(self, mini_batch):
         amP = self.nn(mini_batch)
-        var_approx = tfp.distributions.Normal(loc = amP[:,:,0], scale = tf.exp(amP[:,:,1]))
+        #amP = self.nn(mini_batch / self.orders)
+        var_approx = tfp.distributions.Normal(loc = amP[:,:,0], scale = tf.math.softplus(amP[:,:,1]))
         out_shape = tf.shape(var_approx.loc)
         return tfp.distributions.kl_divergence(
                 var_approx,
@@ -84,7 +87,7 @@ def vanilla_mlp(input_dim, output_dim):
             tf.keras.layers.Dense(30, activation = "relu"),
             tf.keras.layers.Dense(30, activation = "relu"),
             #tf.keras.layers.Dense(30, activation = "relu"),
-            #tf.keras.layers.Dense(48, activation = "relu"), 
+            #tf.keras.layers.Dense(48, activation = "elu"), 
             tf.keras.layers.Dense(2 * output_dim),
             tf.keras.layers.Reshape((output_dim, 2)),
             tf.keras.layers.Lambda(lambda x: tf.cast(x,  default_float()))
@@ -102,6 +105,7 @@ if __name__ == '__main__':
     I = tf.constant([[[0, 0, 0]], [[1, 1, 1]]])
     print(I.shape)
     print(tf.gather(b_out,I, axis = 2, batch_dims = 1))
+    b_out = tf.gather(b_out,I, axis = 2, batch_dims = 1)
     print(tf.reduce_sum(b_out, axis = 2))
 #if __name__ == '__main__':
     

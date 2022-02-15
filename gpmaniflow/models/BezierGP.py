@@ -45,17 +45,25 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin): # Where shoul
         X, Y = data
         
         if self.amortise:
-            I0 = self.order*tf.cast( GetAllListPairs(2, self.input_dim), default_float())
-            n00 = 2 ** self.input_dim
-            pd = tf.cast( tf.math.floor(self.P.batch_size ** (1/self.input_dim)), default_float())
+            #I0 = self.order*tf.cast( GetAllListPairs(2, self.input_dim), default_float())
+            #n00 = 2 ** self.input_dim
+            #pd = tf.cast( tf.math.floor(self.P.batch_size ** (1/self.input_dim)), default_float())
                 
-            I2 = GetAllListPairs(pd, self.input_dim)
-            I2 = (self.order) / pd * tf.cast(I2, default_float()) + tf.random.uniform(maxval = self.order, shape = [1,self.input_dim], dtype = default_float())
-            I2 = tf.math.floormod(I2, self.order - 1)
-            I2 = tf.floor(I2) + 1
+            #I2 = GetAllListPairs(pd, self.input_dim)
+            #I2 = (self.order) / pd * tf.cast(I2, default_float()) + tf.random.uniform(maxval = self.order, shape = [1,self.input_dim], dtype = default_float())
+            #I2 = tf.math.floormod(I2, self.order - 1)
+            #I2 = tf.floor(I2) + 1
             
-            global_I = tf.concat([I2, I0], 0)
-            kl = self.P.num_points * tf.reduce_mean(self.P.kl_divergence(global_I / self.order))
+            #global_I = tf.concat([I2, I0], 0)
+            #print(global_I)
+
+            I = tf.random.uniform(minval = 0, maxval = self.order + 1, shape = [self.P.batch_size, self.input_dim])
+            global_I = tf.math.floor(I)
+            
+            #kl = self.P.kl_divergence(global_I)
+            #print(kl)
+            kl = self.P.num_points * tf.reduce_mean(self.P.kl_divergence(global_I))
+            #print('KL:', kl)
             #kl = 0
             f_mean, f_var = self.predict_f(X, approx = True)
         else:
@@ -63,7 +71,7 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin): # Where shoul
             f_mean, f_var = self.predict_f(X)
         
         var_exp = self.likelihood.variational_expectations(f_mean, f_var, Y)
-        
+        #var_exp = self.likelihood.predict_log_density(f_mean, f_var, Y) 
         if self.num_data is None:
             scale = 1
         else:
@@ -91,16 +99,18 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin): # Where shoul
                 I = tf.data.Dataset.from_tensor_slices(
                         (GetAllListPairs(self.order+1, self.input_dim)))
                 OutB = self.B(Xnew)
-                f_mean = f_var = tf.zeros(shape = [Xnew.shape[0], self.output_dim], dtype = default_float())
+                f_mean = tf.zeros(shape = [tf.shape(Xnew)[0], self.output_dim], dtype = default_float())
+                f_var = tf.zeros(shape = [tf.shape(Xnew)[0], self.output_dim], dtype = default_float())
                 iterator = iter(I.batch(self.P.batch_size))
                 for batch in iterator:
                     outB = tf.gather(OutB, batch, axis = 2)
                     outB = tf.linalg.diag_part(tf.transpose(outB, perm = (0,2,1,3) ))
                     outB = tf.reduce_prod(outB, axis = 2) # [N, B]
                     
-                    amP = self.P.nn(batch / self.order)
+                    #amP = self.P.nn(batch / self.order)
+                    amP = self.P.nn(batch)
                     P_mean = amP[:,:,0]
-                    P_var = tf.math.softplus(amP[:,:,1]) + 1e-3 # Std dev
+                    P_var = tf.math.softplus(amP[:,:,1]) # Std dev
                     
                     batch_f_mean = tf.matmul(outB, P_mean)
                     batch_f_var = tf.matmul(outB ** 2, P_var ** 2)
@@ -110,19 +120,19 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin): # Where shoul
 
             else:
                 if I is None:
-                    #I = tf.random.uniform(minval = 0, maxval = self.order + 1, shape = [self.P.batch_size, self.input_dim])
-                    #I = tf.math.floor(I)
+                    I = tf.random.uniform(minval = 0, maxval = self.order + 1, shape = [self.P.batch_size, self.input_dim])
+                    global_I = tf.math.floor(I)
                     ### 
                     # ALWAYS INCLUDE ENDPOINTS
-                    I0 = self.order*tf.cast( GetAllListPairs(2, self.input_dim), default_float())
-                    n00 = 2 ** self.input_dim
-                    pd = tf.cast( tf.math.floor(self.P.batch_size ** (1/self.input_dim)), default_float())
+                    #I0 = self.order*tf.cast( GetAllListPairs(2, self.input_dim), default_float())
+                    #n00 = 2 ** self.input_dim
+                    #pd = tf.cast( tf.math.floor(self.P.batch_size ** (1/self.input_dim)), default_float())
                     
-                    I2 = GetAllListPairs(pd, self.input_dim)
-                    I2 = (self.order) / pd * tf.cast(I2, default_float()) + tf.random.uniform(maxval = self.order, shape = [1,self.input_dim], dtype = default_float())
-                    I2 = tf.math.floormod(I2, self.order - 1)
-                    I2 = tf.floor(I2) + 1
-                    global_I = tf.concat([I2, I0], 0)
+                    #I2 = GetAllListPairs(pd, self.input_dim)
+                    #I2 = (self.order) / pd * tf.cast(I2, default_float()) + tf.random.uniform(maxval = self.order, shape = [1,self.input_dim], dtype = default_float())
+                    #I2 = tf.math.floormod(I2, self.order - 1)
+                    #I2 = tf.floor(I2) + 1
+                    #global_I = tf.concat([I2, I0], 0)
                 
 
                 if outB is None:
@@ -130,8 +140,8 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin): # Where shoul
                 
                 #sumBfvTotal = tf.reduce_sum(tf.reduce_prod(outB ** 2, axis = 1), axis = 1)
                 sumBfvTotal = tf.reduce_prod(tf.reduce_sum(outB ** 2, axis = 2), axis = 1)
-
-                local_I = GetNearGridPoints2(Xnew, order = self.order, d = self.input_dim, n = 200) # [N, n, d]
+                n = 2000
+                local_I = GetNearGridPoints2(Xnew, order = self.order, d = self.input_dim, n = n) # [N, n, d]
                 # CAN THIS FUNCTION NOT HAVE KNOWN SHAPE WHEN CONSTRUCTING THE GRAPH
                 local_outB = tf.gather(outB, tf.cast(local_I, dtype = tf.int32), 
                         axis = 2, batch_dims = 1)
@@ -141,10 +151,11 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin): # Where shoul
                 
                 sumBfm = tf.reduce_sum(local_outB, axis = 2) # [N, 1]
                 sumBfv = tf.reduce_sum(local_outB ** 2, axis = 2) # [N, 1]
-                local_amP = tf.map_fn(lambda x: self.P.nn(x), local_I / self.order) # [N, n, out_dim, 2] # IS THERE A MORE EFFICIENT WAY HERE
+                local_amP = tf.map_fn(lambda x: self.P.nn(x), local_I) # [N, n, out_dim, 2] # IS THERE A MORE EFFICIENT WAY HERE
+                #local_amP = tf.map_fn(lambda x: self.P.nn(x), local_I / self.order) # [N, n, out_dim, 2] # IS THERE A MORE EFFICIENT WAY HERE
 
                 local_P_mean = local_amP[:,:,:,0] # [N, n, out_dim]
-                local_P_var = tf.math.softplus(local_amP[:,:,:,1]) + 1e-3 # [N, n, out_dim] # Std dev
+                local_P_var = tf.math.softplus(local_amP[:,:,:,1]) # [N, n, out_dim] # Std dev
                 
                 local_f_mean = tf.squeeze(tf.matmul(local_outB, local_P_mean), axis = 1) # [N, out_dim]
                 local_f_var = tf.squeeze(tf.matmul(local_outB ** 2, local_P_var ** 2), axis = 1) 
@@ -152,23 +163,28 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin): # Where shoul
                 global_outB = tf.gather(outB, tf.cast(global_I, dtype = tf.int32), axis = 2)
                 global_outB = tf.linalg.diag_part(tf.transpose(global_outB, perm = (0,2,1,3) ))
                 global_outB = tf.reduce_prod(global_outB, axis = 2) # [N, B]
-                
+                #print(global_outB.shape) 
                 sumBfvTotal = tf.expand_dims(sumBfvTotal, axis = 1)
                 
                 global_sumBfm = tf.reduce_sum(global_outB, axis = 1, keepdims = True) # [N, 1]
                 global_sumBfv = tf.reduce_sum(global_outB ** 2, axis = 1, keepdims = True) # [N, 1]
-                amP = self.P.nn(global_I / self.order) # nn forward pass
+                amP = self.P.nn(global_I) # nn forward pass
+                #amP = self.P.nn(global_I / self.order) # nn forward pass
                 P_mean = amP[:,:,0] # [B, out_dim]
-                P_var = tf.math.softplus(amP[:,:,1]) + 1e-3 # [B, out_dim] # Std dev
+                P_var = tf.math.softplus(amP[:,:,1]) # [B, out_dim] # Std dev
+
                 
                 global_f_mean = tf.matmul(global_outB, P_mean) # [N, out_dim]
                 global_f_var = tf.matmul(global_outB ** 2, P_var ** 2) # Here we dont square P_var
-                #print(sumBfm) 
-                #print(sumBfv)
-                #print(global_sumBfm)
+                print(local_f_mean)
+                print((1 - sumBfm)/global_sumBfm * global_f_mean) 
+                #print((1 - sumBfm) * (self.P.num_points - n) / global_outB.shape[1] * global_f_mean)
+                print(sumBfm)
+                #print(tf.reduce_mean(1/global_sumBfm))
                 #print(sumBfvTotal - sumBfv)
                 #print(global_sumBfv)
-                f_mean = local_f_mean + (1 - sumBfm)/global_sumBfm * global_f_mean
+                f_mean = local_f_mean + (1 - sumBfm) / global_sumBfm  * global_f_mean
+                #f_mean = local_f_mean + (1 - sumBfm) * (self.P.num_points - n)/global_outB.shape[1] * global_f_mean
                 f_var = local_f_var + (sumBfvTotal - sumBfv) / global_sumBfv * global_f_var
         return f_mean, f_var
     
