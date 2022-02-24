@@ -91,44 +91,92 @@ def GetNearGridPoints(X, order, n = 100):
 
 def GetNearGridPoints2(X, order, d, n = 100):
     roundX = tf.math.round(X * order)
-    #print(roundX)
+    #roundX = tf.math.floor(X * order)
+    print(roundX)
     zeroX = X * order - roundX # Should be "close" to origo
-    #print(zeroX)
+    print(zeroX)
     if (order + 1) ** d < n:
         n = (order + 1) ** d
         pd = order
     else:
+        print("hey")
         pd = tf.cast(tf.math.floor(n ** (1/d)), default_float())
-    #print(pd) 
+    print(pd) 
     #if pd >= order:
     #    return tf.cast(tf.tile(GetAllListPairs(order + 1, d)[None,:,:], [order + 1, 1, 1]), default_float())
     #else:
     I = tf.cast(GetAllListPairs(pd + 1, d), default_float())
-    if pd + 1 % 2 == 0:
-        I = I - pd/2 - tf.cast( tf.math.round(tf.random.uniform(shape = [1])), default_float())
-    else:
+    print((pd + 1) % 2)
+    if (pd + 1) % 2 == 0: # pd is uneven
+        print("hey")
+        I = I - (pd-1)/2 - tf.cast( tf.math.round(tf.random.uniform(shape = [d])), default_float())
+    else: # pd is even
         I = I - tf.cast(tf.math.floor(pd/2), default_float())
-    #print(I)
+    print(I)
+    print(I + tf.expand_dims(roundX, axis = 1))
+    mini = tf.reduce_min(I + tf.expand_dims(roundX, axis = 1), axis = 1)
+    maxi = tf.reduce_max(I + tf.expand_dims(roundX, axis = 1), axis = 1)
+    zeroX = zeroX + tf.math.minimum(mini,0) + tf.math.maximum(maxi - order, 0)
+    print(zeroX)
     minus_distance = - square_distance(zeroX, I)
-    #print(minus_distance)
+    print(minus_distance)
     #print(I)
-    _, nearIi = tf.nn.top_k(input = minus_distance, k = n, sorted = False)
+    _, nearIi = tf.nn.top_k(input = minus_distance, k = n, sorted = True)
 
     out = tf.gather(I, nearIi)
-    out = out + tf.expand_dims(roundX, axis = 1)
+    #out = out + tf.expand_dims(roundX, axis = 1)
+    out = out + tf.expand_dims(roundX - tf.math.minimum(mini,0) - tf.math.maximum(maxi - order, 0), axis = 1)
 
-    maxi = tf.reduce_max(out, axis = 1)
-    mini = tf.reduce_min(out, axis = 1)
+    #maxi = tf.reduce_max(out, axis = 1)
+    #mini = tf.reduce_min(out, axis = 1)
     #print(maxi)
     #print(mini)
-    out = out - tf.expand_dims(
-            tf.math.minimum(mini, 0) + tf.math.maximum(maxi - order, 0),
-            axis = 1) # Ensures points within hypercube
+    #out = out - tf.expand_dims(
+    #        tf.math.minimum(mini, 0) + tf.math.maximum(maxi - order, 0),
+    #        axis = 1) # Ensures points within hypercube
     
     #print(out) 
     return out
 
-
+def GetNearGridPoints3(BXnew, input_dim, n = 100):
+    # BXnew is [N, d, order + 1]
+    def GetBiggestSubSum(A, n = n):
+        # A is [d, order + 1]
+        print(A)
+        idx = tf.argsort(A, axis = 1, direction = 'DESCENDING')
+        print(idx)
+        #As = tf.gather(A, idx, axis = 1)
+        #print(As)
+        #I = tf.ragged.constant( [[0]] * input_dim)
+        I = tf.gather(A, tf.gather(idx, [0] * input_dim, batch_dims = 1), batch_dims = 1)
+        print(I)
+        I = tf.ragged.constant(I)
+        print(I)
+        NumberOfPoints = 1; Att = [1] * input_dim
+        #print(Att)
+        while NumberOfPoints < n:
+            #print(tf.gather(idx, Att, batch_dims = 1))
+            new = tf.gather(A, tf.gather(idx, Att, batch_dims = 1), batch_dims = 1) 
+            #print(new)
+            new = tf.argsort(new)[-1]
+            #print(new)
+            
+            #I[new].append[Att[new]] 
+            Att[new] += 1 
+            NumberOfPoints = tf.reduce_prod(Att)
+            print(NumberOfPoints)
+        print(Att)
+        #grid = tf.meshgrid(*[I for i in range(k)])
+        print('what', tf.gather(idx[0,:], range(Att[0])))
+        out = tf.meshgrid(*[tf.gather(idx[i,:], range(Att[i])) for i in range(input_dim)])
+        print(out)
+        out = tf.concat([tf.reshape(out[i], (-1,1)) for i in range(input_dim)], axis = -1)
+        print(out)
+        return out
+    #itm = GetBiggestSubSum(BXnew[1,:,:])
+    #print(itm)
+    return tf.map_fn(lambda x: GetBiggestSubSum(x, n), BXnew, 
+            fn_output_signature = tf.RaggedTensorSpec(ragged_rank = 0, dtype = tf.int32)) 
 def uniq(J):
     return np.unique(J, axis = 0)
 
@@ -140,9 +188,19 @@ if __name__ == '__main__':
     #n = 5; k = 6
     #out = GetAllPairs(n, k)
     #print(out)
-    X = np.array([[0.21, 0.30, 0.3927, 0.701], [0.228, 0.29, 0.59, 0.959]])
+    X = np.array([[0.102, 0.266, 0.479, 0.506], 
+        [0.91, 0.89, 0.59, 0.959],
+        [0.5, .5, .5, .5]])
     #I = GetNearGridPoints(X, 10)
-    I = GetNearGridPoints2(X, 10, 4, 1000)
+    I = GetNearGridPoints2(X, 10, 4, 100)
     print(I)
+    print(X)
+    from gpmaniflow.surfaces import BernsteinPolynomial
+    B = BernsteinPolynomial(10)
+    BX = B(X)
+    print(BX)
+    I0 = GetNearGridPoints3(BX, 4, n = 100)
+    print(I0)
+    print(I0.shape)
     print(X)
     #print(I.shape)
