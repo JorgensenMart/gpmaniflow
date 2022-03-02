@@ -138,45 +138,60 @@ def GetNearGridPoints2(X, order, d, n = 100):
     #print(out) 
     return out
 
-def GetNearGridPoints3(BXnew, input_dim, n = 100):
+def GetNearGridPoints3(BXnew, input_dim, order, n = 100):
     # BXnew is [N, d, order + 1]
     def GetBiggestSubSum(A, n = n):
         # A is [d, order + 1]
-        print(A)
+        #print(A)
         idx = tf.argsort(A, axis = 1, direction = 'DESCENDING')
-        print(idx)
+        #print(idx)
         #As = tf.gather(A, idx, axis = 1)
         #print(As)
         #I = tf.ragged.constant( [[0]] * input_dim)
-        I = tf.gather(A, tf.gather(idx, [0] * input_dim, batch_dims = 1), batch_dims = 1)
-        print(I)
-        I = tf.ragged.constant(I)
-        print(I)
-        NumberOfPoints = 1; Att = [1] * input_dim
+        #I = tf.gather(A, tf.gather(idx, [0] * input_dim, batch_dims = 1), batch_dims = 1)
+        #print(I)
+        #I = tf.ragged.constant(I)
+        #print(I)
+        NumberOfPoints = 1; Att = tf.constant([1] * input_dim, dtype = tf.int32)
         #print(Att)
-        while NumberOfPoints < n:
-            #print(tf.gather(idx, Att, batch_dims = 1))
-            new = tf.gather(A, tf.gather(idx, Att, batch_dims = 1), batch_dims = 1) 
+        #while tf.less(NumberOfPoints, n):
+        def foo(Att): 
+            M = tf.gather(A, tf.gather(idx, Att, batch_dims = 1), batch_dims = 1)
             #print(new)
-            new = tf.argsort(new)[-1]
-            #print(new)
+            #new = tf.argsort(M)[-1]
+            def recursive_check(M, Att, i):
+                #print(i)
+                new = tf.argsort(M)[i]
+                #print(Att)
+                if tf.math.equal(Att[new], order):
+                    if i == -input_dim:
+                        return new
+                    else:
+                        return recursive_check(M, Att, i - 1)
+                else:
+                    return new
             
-            #I[new].append[Att[new]] 
-            Att[new] += 1 
+            new = recursive_check(M, Att, -1)
+
+            Att = Att + tf.one_hot(new, input_dim, dtype = tf.int32) 
             NumberOfPoints = tf.reduce_prod(Att)
-            print(NumberOfPoints)
-        print(Att)
+            return NumberOfPoints, Att
+
+        NumberOfPoints, Att = tf.while_loop(lambda NumberOfPoints, Att: tf.less(NumberOfPoints, n), lambda NumberOfPoints, Att: foo(Att), [NumberOfPoints, Att])
+                
+        #print(out1)
+        #print(out2)
         #grid = tf.meshgrid(*[I for i in range(k)])
-        print('what', tf.gather(idx[0,:], range(Att[0])))
+        #print('what', tf.gather(idx[0,:], range(Att[0])))
         out = tf.meshgrid(*[tf.gather(idx[i,:], range(Att[i])) for i in range(input_dim)])
-        print(out)
+        #print(out)
         out = tf.concat([tf.reshape(out[i], (-1,1)) for i in range(input_dim)], axis = -1)
-        print(out)
+        #print(out)
         return out
     #itm = GetBiggestSubSum(BXnew[1,:,:])
     #print(itm)
     return tf.map_fn(lambda x: GetBiggestSubSum(x, n), BXnew, 
-            fn_output_signature = tf.RaggedTensorSpec(ragged_rank = 0, dtype = tf.int32)) 
+            fn_output_signature = tf.RaggedTensorSpec(shape = [None, input_dim], ragged_rank = 0, dtype = tf.int32)) 
 def uniq(J):
     return np.unique(J, axis = 0)
 
@@ -188,19 +203,20 @@ if __name__ == '__main__':
     #n = 5; k = 6
     #out = GetAllPairs(n, k)
     #print(out)
-    X = np.array([[0.102, 0.266, 0.479, 0.506], 
-        [0.91, 0.89, 0.59, 0.959],
-        [0.5, .5, .5, .5]])
+    X = np.array([[0.0112, 0.01266, 0.00658, 0.536]])#, 
+        #[0.91, 0.89, 0.59, 0.959],
+        #[0.5, .5, .5, .5]])
     #I = GetNearGridPoints(X, 10)
-    I = GetNearGridPoints2(X, 10, 4, 100)
-    print(I)
+    #I = GetNearGridPoints2(X, 10, 4, 100)
+    #print(I)
     print(X)
     from gpmaniflow.surfaces import BernsteinPolynomial
     B = BernsteinPolynomial(10)
     BX = B(X)
     print(BX)
-    I0 = GetNearGridPoints3(BX, 4, n = 100)
+    I0 = GetNearGridPoints3(BX, 4, 10,  n = 2000)
     print(I0)
-    print(I0.shape)
+    print(I0.dtype)
     print(X)
     #print(I.shape)
+    #print("onehot:", tf.one_hot(2, 4))

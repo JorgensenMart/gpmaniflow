@@ -88,6 +88,62 @@ class BernsteinPolynomial():
             B_out = X1 * X2 * binom(np.array(self.orders), range(O))
             return B_out
 
+
+class BernsteinNetwork(tf.keras.layers.Layer):
+    def __init__(self, input_dim = 1, orders = 1):
+        super(BernsteinNetwork,self).__init__()
+        self.orders = orders
+        print(orders)
+        _dummy = [0]; _dummy.extend(orders)
+        print(_dummy)
+        self.input_dim = input_dim
+        
+        w_init = tf.random_normal_initializer()
+        self.meanw = (*[tf.Variable(initial_value = w_init(shape = (_dummy[i] + 1, _dummy[i+1] + 1), dtype = default_float()), trainable = True,) for i in range(input_dim)],)
+        self.varw = (*[tf.Variable(initial_value = w_init(shape = (_dummy[i] + 1, _dummy[i+1] + 1), dtype = default_float()), trainable = True,) for i in range(input_dim)],)
+        
+        self.B = BernsteinPolynomial(10)
+        self.prior_sc = prior_adjusting(10)
+        print(self.prior_sc)
+
+    def f_mean(self, Xnew):
+        outB = self.B(Xnew) # [N, d, o + 1]
+        f = tf.ones((tf.shape(outB)[0], 1), dtype = default_float()) # [N, 1]
+        for i in range(self.input_dim):
+            f = tf.matmul(f, self.meanw[i]) # [N, o+1]
+            #print(f)
+            f = f * outB[:,i,:] # [N, o + 1]
+        f = tf.reduce_sum(f, axis = 1, keepdims = True)
+        return f# [N, 1]
+
+    def f_var(self, Xnew):
+        outB = self.B(Xnew) # [N, d, o + 1]
+        f = tf.ones((tf.shape(outB)[0], 1), dtype = default_float()) # [N, 1]
+        for i in range(self.input_dim):
+            f = tf.matmul(f, tf.math.exp(self.varw[i]) * tf.transpose(self.prior_sc ** 2)) # [N, o+1]
+            f = f * outB[:,i,:] ** 2 # [N, o + 1]
+        f = tf.reduce_sum(f, axis = 1, keepdims = True)
+        return f# [N, 1]
+
+    def P_mean(self, batch):
+        # batch is [N, d]
+        P = tf.ones((tf.shape(batch)[0],1), dtype = default_float())
+        for i in range(self.input_dim):
+            P = tf.matmul(P, self.meanw[i]) 
+            #print(tf.one_hot(batch[:,i] * self.orders[i], self.orders[i] + 1, dtype = default_float()))
+            P = P * tf.one_hot(batch[:,i] * self.orders[i], self.orders[i] + 1, dtype = default_float())
+        P = tf.reduce_sum(P, axis = 1, keepdims = True)
+        return P# [N, 1}
+
+    def P_var(self, batch):
+        P = tf.ones((tf.shape(batch)[0],1), dtype = default_float())
+        for i in range(self.input_dim):
+            P = tf.matmul(P, tf.math.exp(self.varw[i])) 
+            #print(tf.one_hot(batch[:,i] * self.orders[i], self.orders[i] + 1, dtype = default_float()))
+            P = P * tf.one_hot(batch[:,i] * self.orders[i], self.orders[i] + 1, dtype = default_float())
+        P = tf.reduce_sum(P, axis = 1, keepdims = True)
+        return P # [N, 1]
+
 def prior_adjusting(order):
     if order > 25:
         raise NotImplementedError
@@ -97,6 +153,10 @@ def prior_adjusting(order):
     BX = B(I)
     P = tf.linalg.inv( tf.squeeze(BX ** 2, axis = 1) )
     return tf.sqrt( tf.matmul(P, tf.ones([order + 1, 1], dtype = default_float())) ) 
+
+
+
+
 
 def vanilla_mlp(input_dim, output_dim):
     mlp = tf.keras.Sequential([
@@ -113,17 +173,24 @@ def vanilla_mlp(input_dim, output_dim):
     return mlp
 
 if __name__ == '__main__':
+    l = [1]; j = [2, 3]
+    l.extend(j)
+    print(l)
+    N = BernsteinNetwork(input_dim = 2, orders = [3,3])
+    print(N.w)
+    f = N.f_mean(tf.constant([[1., 1.]], dtype = default_float()))
+    print(f)
     #P = AmortisedControlPoints(input_dim = 1)
     #print(P.nn)
     #out = P.nn(np.array([[1]]))
     #print(out)
-    B = BernsteinPolynomial(orders = 10)
-    b_out = B(tf.constant([[0.05, 0.05, 0.05], [0.3, 0.9, 0.4]], dtype = default_float() ))
-    print(b_out) # [N, d, B]
-    I = tf.constant([[[0, 0, 0]], [[1, 1, 1]]])
+    #B = BernsteinPolynomial(orders = 10)
+    #b_out = B(tf.constant([[0.05, 0.05, 0.05], [0.3, 0.9, 0.4]], dtype = default_float() ))
+    #print(b_out) # [N, d, B]
+    #I = tf.constant([[[0, 0, 0]], [[1, 1, 1]]])
     #print(I.shape)
-    print(tf.gather(b_out,I, axis = 2, batch_dims = 1))
-    b_out = tf.gather(b_out,I, axis = 2, batch_dims = 1)
+    #print(tf.gather(b_out,I, axis = 2, batch_dims = 1))
+    #b_out = tf.gather(b_out,I, axis = 2, batch_dims = 1)
     #print(tf.reduce_sum(b_out, axis = 2))
     
     #P = prior_adjusting(10)
