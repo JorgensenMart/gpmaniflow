@@ -102,8 +102,8 @@ class BernsteinNetwork(tf.keras.layers.Layer):
         self.meanw = (*[tf.Variable(initial_value = w_init(shape = (_dummy[i] + 1, _dummy[i+1] + 1), dtype = default_float()), trainable = True,) for i in range(input_dim)],)
         self.varw = (*[tf.Variable(initial_value = w_init(shape = (_dummy[i] + 1, _dummy[i+1] + 1), dtype = default_float()), trainable = True,) for i in range(input_dim)],)
         
-        self.B = BernsteinPolynomial(10)
-        self.prior_sc = prior_adjusting(10)
+        self.B = BernsteinPolynomial(self.orders[0])
+        self.prior_sc = prior_adjusting(self.orders[0])
         print(self.prior_sc)
 
     def f_mean(self, Xnew):
@@ -125,6 +125,30 @@ class BernsteinNetwork(tf.keras.layers.Layer):
         f = tf.reduce_sum(f, axis = 1, keepdims = True)
         return f# [N, 1]
 
+    def kl(self):
+        num_points = tf.reduce_prod(tf.cast(self.orders, dtype = default_float()) + 1)
+        numpathsfrom = num_points
+        numpathsto = tf.ones(1, dtype = default_float())
+        meanterm = tf.ones((1,1), dtype = default_float()) # [1,1] 
+        traceterm = tf.ones((1,1), dtype = default_float()) # [1,1] 
+        detterm = tf.zeros((1,1), dtype = default_float()) # [1,1]
+        #print(tf.reduce_prod(self.orders))
+        for i in range(self.input_dim):
+            meanterm = tf.matmul(meanterm, self.meanw[i] ** 2 * tf.transpose(1 / self.prior_sc ** 2))
+            traceterm = tf.matmul(traceterm, tf.math.exp(self.varw[i]))
+            #numpathsfrom = numpathsfrom / (tf.cast(self.orders[i], default_float()) + 1)
+            #numpathsto = numpathsto * tf.cast(tf.shape(self.varw[i])[0], default_float())
+            #detterm += tf.reduce_sum(self.varw[i]) * num_points / tf.reduce_prod(tf.cast(tf.shape(self.varw[i]), default_float()))
+            detterm += tf.reduce_mean(self.varw[i]) * num_points 
+            print(detterm)
+            #print(numpathsfrom + numpathsto)
+        meanterm = tf.reduce_sum(meanterm, axis = 1, keepdims = True)
+        traceterm = tf.reduce_sum(traceterm, axis = 1, keepdims = True)
+        print('det_term:', detterm)
+        print('mean_term:', meanterm)
+        print('trace_term:', traceterm)
+        return 0.5 * (traceterm + meanterm - num_points - detterm) # yes, detterm should have negative sign
+
     def P_mean(self, batch):
         # batch is [N, d]
         P = tf.ones((tf.shape(batch)[0],1), dtype = default_float())
@@ -138,7 +162,7 @@ class BernsteinNetwork(tf.keras.layers.Layer):
     def P_var(self, batch):
         P = tf.ones((tf.shape(batch)[0],1), dtype = default_float())
         for i in range(self.input_dim):
-            P = tf.matmul(P, tf.math.exp(self.varw[i])) 
+            P = tf.matmul(P, tf.math.exp(self.varw[i]) * tf.transpose(self.prior_sc ** 2)) 
             #print(tf.one_hot(batch[:,i] * self.orders[i], self.orders[i] + 1, dtype = default_float()))
             P = P * tf.one_hot(batch[:,i] * self.orders[i], self.orders[i] + 1, dtype = default_float())
         P = tf.reduce_sum(P, axis = 1, keepdims = True)

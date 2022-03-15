@@ -39,13 +39,13 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin):
 
     def elbo(self, data: RegressionData) -> tf.Tensor:
         X, Y = data
-        #kl = self.P.num_points * tf.reduce_mean(self.P.kl_divergence(global_I))
+        kl = self.BN.kl()
         #print('KL:', kl)
-        kl = 0
+        #kl = 0
         f_mean, f_var = self.predict_f(X)
         
-        #var_exp = self.likelihood.variational_expectations(f_mean, f_var, Y)
-        var_exp = self.likelihood.predict_log_density(f_mean, f_var, Y) 
+        var_exp = self.likelihood.variational_expectations(f_mean, f_var, Y)
+        #var_exp = self.likelihood.predict_log_density(f_mean, f_var, Y) 
         if self.num_data is None:
             scale = 1
         else:
