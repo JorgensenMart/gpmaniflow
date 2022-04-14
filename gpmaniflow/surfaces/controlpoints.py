@@ -9,67 +9,6 @@ from gpflow.utilities import positive
 from gpmaniflow.utils import binomial_coef as binom
 from gpmaniflow.utils import GetAllListPairs
 
-class ControlPoints(Module):
-    def __init__(self, input_dim, output_dim = 1, orders = 1):
-        self.num_points = (orders + 1) ** input_dim # What are we doing about potential overflow?
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.orders = orders
-
-        self.priors = tfp.distributions.Normal(
-                loc = tf.zeros([self.orders + 1] * self.input_dim + [self.output_dim], dtype = default_float()),
-                scale = tf.ones([self.orders + 1] * self.input_dim + [self.output_dim], dtype = default_float())
-                )
-        
-        self.variational_loc = Parameter(value = tf.zeros([self.orders + 1] * self.input_dim + [self.output_dim], dtype = default_float() )) 
-        self.variational_scale = Parameter(value = tf.ones([self.orders + 1] * self.input_dim + [self.output_dim], dtype = default_float() ), transform = positive()) 
-        
-        self.variational_posteriors = tfp.distributions.Normal(loc = self.variational_loc, scale = self.variational_scale) 
-
-    def kl_divergence(self):
-        return tfp.distributions.kl_divergence(self.variational_posteriors, self.priors)
-
-class AmortisedControlPoints(Module):
-    def __init__(self, input_dim, output_dim = 1, orders = 1, nn = None, batch_size = None):
-        self.num_points = (orders + 1) ** input_dim
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.orders = orders
-        # test
-        self.prior_scale = Parameter(value = 1, dtype = default_float(), transform = positive())
-        self.prior_adjustment = prior_adjusting(self.orders) # [o + 1, 1]
-
-        if nn == None:
-            self.nn = vanilla_mlp(self.input_dim, self.output_dim) # This should be implemented for several output dims
-        else:
-            self.nn = nn
-        self.nn.build()
-        if batch_size is None:
-            self.batch_size = min(2000, self.num_points)
-        else:
-            self.batch_size = batch_size
-    
-    def prior_sc(self, mini_batch):
-        sc = tf.gather(self.prior_adjustment, mini_batch, axis = 0) # [B, d, 1]
-        sc = tf.reduce_prod(sc, axis = 1) # [B, 1]
-        return sc
-    
-    def forward(self, mini_batch):
-        return self.nn(mini_batch) # [B, P, n_params]   
-    
-    def kl_divergence(self, mini_batch):
-        amP = self.nn(mini_batch / self.orders)
-        #amP = self.nn(mini_batch / self.orders)
-        var_approx = tfp.distributions.Normal(loc = amP[:,:,0], scale = tf.math.exp(amP[:,:,1]))
-        out_shape = tf.shape(var_approx.loc)
-        return tfp.distributions.kl_divergence(
-                var_approx,
-                #tfp.distributions.Normal(loc = tf.zeros(out_shape, dtype = default_float()), scale = tf.ones(out_shape, dtype = default_float())))
-                tfp.distributions.Normal(loc = tf.zeros(out_shape, dtype = default_float()), scale = self.prior_scale *  self.prior_sc(tf.cast(mini_batch, dtype = tf.int32))))
-
-    #pass
-
-
 class BernsteinPolynomial():
     def __init__(self, orders = None):
         self.orders = orders
@@ -77,84 +16,86 @@ class BernsteinPolynomial():
     def __call__(self, Xnew: InputData):
         return self.forward(Xnew)
 
-    def forward(self, Xnew: InputData, mini_batch = None):
-        if mini_batch is not None:
-            raise NotImplementedError
-        else:
-            O = self.orders + 1
-            Xnew = tf.stack([Xnew] * O, axis = 2)
-            X1 = tf.math.pow(Xnew, range(O))
-            X2 = tf.math.pow(1. - Xnew, np.array(self.orders) - range(O))
-            B_out = X1 * X2 * binom(np.array(self.orders), range(O))
-            return B_out
+    def forward(self, Xnew: InputData):
+        O = self.orders + 1
+        Xnew = tf.stack([Xnew] * O, axis = 2)
+        X1 = tf.math.pow(Xnew, range(O))
+        X2 = tf.math.pow(1. - Xnew, np.array(self.orders) - range(O))
+        B_out = X1 * X2 * binom(np.array(self.orders), range(O))
+        return B_out
 
 
 class BernsteinNetwork(tf.keras.layers.Layer):
-    def __init__(self, input_dim = 1, orders = 1):
+    def __init__(self, input_dim = 1, orders = 1, num_perm = 20):
         super(BernsteinNetwork,self).__init__()
         self.orders = orders
-        print(orders)
         _dummy = [0]; _dummy.extend(orders)
-        print(_dummy)
         self.input_dim = input_dim
         
-        w_init = tf.random_normal_initializer()
-        self.meanw = (*[tf.Variable(initial_value = w_init(shape = (_dummy[i] + 1, _dummy[i+1] + 1), dtype = default_float()), trainable = True,) for i in range(input_dim)],)
-        self.varw = (*[tf.Variable(initial_value = w_init(shape = (_dummy[i] + 1, _dummy[i+1] + 1), dtype = default_float()), trainable = True,) for i in range(input_dim)],)
+        meanw_init = tf.random_normal_initializer(mean = 0.01 ** (1/self.input_dim), stddev = 0.01)
+        #meanw_init = tf.zeros_initializer()
+        varw_init = tf.random_normal_initializer(mean = -5.0, stddev = 0.1)
+        #varw_init = tf.zeros_initializer()
+        
+        self.num_perm = num_perm
+        _perm = np.tile(range(self.input_dim), (self.num_perm,1))
+        self.perm = np.apply_along_axis(np.random.permutation, axis=1, arr=_perm)
+        self.meanw = (*[tf.Variable(initial_value = meanw_init(shape = (self.num_perm, _dummy[i] + 1, _dummy[i+1] + 1), dtype = default_float()), trainable = True,) for i in range(input_dim)],)
+        self.varw = (*[tf.Variable(initial_value = varw_init(shape = (self.num_perm, _dummy[i] + 1, _dummy[i+1] + 1), dtype = default_float()), trainable = True,) for i in range(input_dim)],)
         
         self.B = BernsteinPolynomial(self.orders[0])
+        #self.prior_sc = tf.ones(self.orders[0] + 1, default_float())#prior_adjusting(self.orders[0])
         self.prior_sc = prior_adjusting(self.orders[0])
-        print(self.prior_sc)
-
+        self.prior_variance = Parameter(value = [1 / (self.num_perm + 1e-3)] * self.num_perm, dtype = default_float(), trainable = True, transform = positive())
+        self.posterior_precision = Parameter(value = [self.num_perm + 1e-3] * self.num_perm, dtype = default_float(), trainable = True, transform = positive()) 
+    
     def f_mean(self, Xnew):
         outB = self.B(Xnew) # [N, d, o + 1]
-        f = tf.ones((tf.shape(outB)[0], 1), dtype = default_float()) # [N, 1]
+        outB = tf.gather(outB, self.perm, axis = 1)
+        outB = tf.transpose(outB, (1,0,2,3)) # [R, N, d, o + 1]
+        f = tf.ones((self.num_perm, tf.shape(outB)[1], 1), dtype = default_float()) # [R, N, 1] 
         for i in range(self.input_dim):
-            f = tf.matmul(f, self.meanw[i]) # [N, o+1]
-            #print(f)
-            f = f * outB[:,i,:] # [N, o + 1]
-        f = tf.reduce_sum(f, axis = 1, keepdims = True)
+            f = tf.matmul(f, self.meanw[i]) # [R, N, o+1]
+            f = f * outB[:,:,i,:] # [R, N, o + 1]
+        f = tf.reduce_sum(f, axis = -1, keepdims = True)
+        f = tf.reduce_sum(f, axis = 0)
         return f# [N, 1]
 
     def f_var(self, Xnew):
         outB = self.B(Xnew) # [N, d, o + 1]
-        f = tf.ones((tf.shape(outB)[0], 1), dtype = default_float()) # [N, 1]
+        outB = tf.gather(outB, self.perm, axis = 1)
+        outB = tf.transpose(outB, (1,0,2,3)) # [R, N, d, o + 1]
+        f = tf.ones((self.num_perm, tf.shape(outB)[1], 1), dtype = default_float()) # [R, N, 1]
         for i in range(self.input_dim):
-            f = tf.matmul(f, tf.math.exp(self.varw[i]) * tf.transpose(self.prior_sc ** 2)) # [N, o+1]
-            f = f * outB[:,i,:] ** 2 # [N, o + 1]
-        f = tf.reduce_sum(f, axis = 1, keepdims = True)
-        return f# [N, 1]
+            f = tf.matmul(f, tf.math.exp(self.varw[i]) * tf.transpose(self.prior_sc ** 2)) # [R, N, o+1]
+            f = f * outB[:,:,i,:] ** 2 # [R, N, o + 1]
+        f = tf.reduce_sum(f, axis = -1, keepdims = True) # [R, N, 1]
+        f = tf.reduce_sum(f / self.posterior_precision[:,None,None], axis = 0)
+        return f # [N, 1]
 
     def kl(self):
         num_points = tf.reduce_prod(tf.cast(self.orders, dtype = default_float()) + 1)
-        numpathsfrom = num_points
-        numpathsto = tf.ones(1, dtype = default_float())
-        meanterm = tf.ones((1,1), dtype = default_float()) # [1,1] 
-        traceterm = tf.ones((1,1), dtype = default_float()) # [1,1] 
-        detterm = tf.zeros((1,1), dtype = default_float()) # [1,1]
-        #print(tf.reduce_prod(self.orders))
+        meanterm = tf.ones((self.num_perm, 1, 1), dtype = default_float())  
+        traceterm = tf.ones((self.num_perm, 1, 1), dtype = default_float())  
+        detterm = 0.0#tf.zeros(1, dtype = default_float()) 
         for i in range(self.input_dim):
             meanterm = tf.matmul(meanterm, self.meanw[i] ** 2 * tf.transpose(1 / self.prior_sc ** 2))
             traceterm = tf.matmul(traceterm, tf.math.exp(self.varw[i]))
-            #numpathsfrom = numpathsfrom / (tf.cast(self.orders[i], default_float()) + 1)
-            #numpathsto = numpathsto * tf.cast(tf.shape(self.varw[i])[0], default_float())
-            #detterm += tf.reduce_sum(self.varw[i]) * num_points / tf.reduce_prod(tf.cast(tf.shape(self.varw[i]), default_float()))
-            detterm += tf.reduce_mean(self.varw[i]) * num_points 
-            print(detterm)
-            #print(numpathsfrom + numpathsto)
-        meanterm = tf.reduce_sum(meanterm, axis = 1, keepdims = True)
-        traceterm = tf.reduce_sum(traceterm, axis = 1, keepdims = True)
-        print('det_term:', detterm)
-        print('mean_term:', meanterm)
-        print('trace_term:', traceterm)
-        return 0.5 * (traceterm + meanterm - num_points - detterm) # yes, detterm should have negative sign
+            detterm += tf.reduce_mean(self.varw[i]) * (num_points * self.num_perm)
+        meanterm = tf.reduce_sum(meanterm, axis = (1,2))
+        traceterm = tf.reduce_sum(traceterm, axis = (1,2))
+        meanterm = tf.reduce_sum(meanterm / self.prior_variance)## / self.prior_variance)
+        traceterm = tf.reduce_sum(traceterm / (self.prior_variance * self.posterior_precision))# / self.prior_variance)
+        print(num_points * self.num_perm)
+        print(meanterm)
+        print(traceterm)
+        print(detterm)
+        return 0.5 * (traceterm + meanterm - (num_points * self.num_perm) + num_points * tf.reduce_sum(tf.math.log(self.prior_variance * self.posterior_precision)) - detterm)
 
     def P_mean(self, batch):
-        # batch is [N, d]
         P = tf.ones((tf.shape(batch)[0],1), dtype = default_float())
         for i in range(self.input_dim):
             P = tf.matmul(P, self.meanw[i]) 
-            #print(tf.one_hot(batch[:,i] * self.orders[i], self.orders[i] + 1, dtype = default_float()))
             P = P * tf.one_hot(batch[:,i] * self.orders[i], self.orders[i] + 1, dtype = default_float())
         P = tf.reduce_sum(P, axis = 1, keepdims = True)
         return P# [N, 1}
@@ -163,15 +104,21 @@ class BernsteinNetwork(tf.keras.layers.Layer):
         P = tf.ones((tf.shape(batch)[0],1), dtype = default_float())
         for i in range(self.input_dim):
             P = tf.matmul(P, tf.math.exp(self.varw[i]) * tf.transpose(self.prior_sc ** 2)) 
-            #print(tf.one_hot(batch[:,i] * self.orders[i], self.orders[i] + 1, dtype = default_float()))
             P = P * tf.one_hot(batch[:,i] * self.orders[i], self.orders[i] + 1, dtype = default_float())
         P = tf.reduce_sum(P, axis = 1, keepdims = True)
         return P # [N, 1]
 
+    def integral(self):
+        num_points = tf.reduce_prod(tf.cast(self.orders, dtype = default_float()) + 1) 
+        f = tf.ones((self.num_perm, 1, 1), dtype = default_float()) # [R, N, 1] 
+        for i in range(self.input_dim):
+            f = tf.matmul(f, self.meanw[i]) # [R, N, o+1]
+        f = tf.reduce_sum(f)
+        return f / num_points
+
 def prior_adjusting(order):
     if order > 25:
         raise NotImplementedError
-
     I = tf.cast(GetAllListPairs(order + 1, 1), default_float()) / order
     B = BernsteinPolynomial(order)
     BX = B(I)
@@ -180,90 +127,12 @@ def prior_adjusting(order):
 
 
 
-
-
-def vanilla_mlp(input_dim, output_dim):
-    mlp = tf.keras.Sequential([
-            tf.keras.Input(shape = (input_dim,)),
-            tf.keras.layers.Dense(input_dim),
-            #tf.keras.layers.Dense(40, activation = "relu"),
-            tf.keras.layers.Dense(40, activation = "relu"),
-            tf.keras.layers.Dense(40, activation = "relu"),
-            #tf.keras.layers.Dense(48, activation = "elu"), 
-            tf.keras.layers.Dense(2 * output_dim),
-            tf.keras.layers.Reshape((output_dim, 2)),
-            tf.keras.layers.Lambda(lambda x: tf.cast(x,  default_float()))
-            ])
-    return mlp
-
 if __name__ == '__main__':
     l = [1]; j = [2, 3]
     l.extend(j)
     print(l)
-    N = BernsteinNetwork(input_dim = 2, orders = [3,3])
-    print(N.w)
-    f = N.f_mean(tf.constant([[1., 1.]], dtype = default_float()))
-    print(f)
-    #P = AmortisedControlPoints(input_dim = 1)
-    #print(P.nn)
-    #out = P.nn(np.array([[1]]))
-    #print(out)
-    #B = BernsteinPolynomial(orders = 10)
-    #b_out = B(tf.constant([[0.05, 0.05, 0.05], [0.3, 0.9, 0.4]], dtype = default_float() ))
-    #print(b_out) # [N, d, B]
-    #I = tf.constant([[[0, 0, 0]], [[1, 1, 1]]])
-    #print(I.shape)
-    #print(tf.gather(b_out,I, axis = 2, batch_dims = 1))
-    #b_out = tf.gather(b_out,I, axis = 2, batch_dims = 1)
-    #print(tf.reduce_sum(b_out, axis = 2))
-    
-    #P = prior_adjusting(10)
-    #print(P)
-    #I = GetAllListPairs(3, 2)
-    #print(I)
-    #pout = tf.gather(P, I, axis = 0)
-    #print(pout)
-    #pout = tf.reduce_prod(pout, axis = 1)
-    #print(pout)
-#if __name__ == '__main__':
-    
-#    B = BernsteinPolynomial(orders = 5)
-#    X = tf.constant([[0], [1]], dtype = default_float())
-#    #print(X)
-#    B_out = B(X)
-#    print(B_out)
-    
- #   I = tf.range(0,B.orders+1)
-  #  print(I)
-   # grid1 = tf.meshgrid(I)
-    #print(grid1)
-    #print(grid2)
-    #print(grid3)
-#    out = tf.concat( [tf.reshape(grid1, (-1, 1)), tf.reshape(grid2, (-1,1)), tf.reshape(grid3, (-1,1))], axis = -1)
-#    print(out)
-
-    # THIS GIVES ALL TRIPLETS, AND SHOULD EXTEND TO HIGHER: QUADRUPLETS ETC.
-    #Is = tf.reshape( [0, 1, 2] * 64, (64, 3))
-    #print(Is)
-    #Bii = tf.gather_nd(B_out, [[[0,0]]])
-    #print(Bii
-    #myB = tf.gather(B_out, out, axis = 2)
-    #print(tf.gather(B_out, out, axis = 2))
-    #print(tf.linalg.diag_part(tf.transpose(myB, perm = (0,2,1,3))))
-    
-    #P = ControlPoints(input_dim = 3, orders = 3)
-    #print(tf.gather_nd(P.variational_posteriors.loc, out))
-    #print(P.priors)
-    #print(tf.reduce_sum(P.kl_divergence()))
-
-    # Now we're playing
-    #N = 2; D = 3; O = 3
-    #X = tf.zeros([N, D])
-    #X = tf.stack([X] * O, axis = 2)
-    #T = range(0,O)
-#X = tf.math.pow(X, T)
- #   print(X)
-    #import numpy as np
-    #print(binom(np.array(5),np.array( [0, 1])))
-        # TODO: make it work for multidimensional outputs
-        # TODO: make it work for multidimensional outputs
+    B = BernsteinPolynomial(3)
+    X = np.array([[0.1]])
+    print(X.dtype)
+    BX = B(X)
+    print(BX)

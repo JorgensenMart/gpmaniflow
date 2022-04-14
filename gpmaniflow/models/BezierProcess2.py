@@ -25,10 +25,8 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin):
         super().__init__()
         self.input_dim = input_dim
         if isinstance(orders, int):
-            print("hey")
             listo = [orders] * input_dim
         self.orders = listo
-        print(listo)
         self.num_data = num_data # Important to set when using minibatches
         self.likelihood = likelihood
         
@@ -53,7 +51,11 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin):
         
         return scale * tf.reduce_sum(var_exp) - kl 
 
-    def predict_f(self, Xnew: InputData, I = None, pi = None, approx = False, outB = None):       
+    def predict_f(self, Xnew: InputData):       
         f_mean = self.BN.f_mean(Xnew)
         f_var = self.BN.f_var(Xnew)
         return f_mean, f_var
+
+    def predict_y(self, Xnew: InputData):
+        f_mean, f_var = self.predict_f(Xnew)
+        return self.likelihood.predict_mean_and_var(f_mean, f_var)
