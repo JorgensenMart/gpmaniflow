@@ -37,6 +37,7 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin):
 
     def elbo(self, data: RegressionData) -> tf.Tensor:
         X, Y = data
+        assert X.shape[1] == self.input_dim
         kl = self.BN.kl()
         #print('KL:', kl)
         #kl = 0
