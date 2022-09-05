@@ -1,4 +1,4 @@
 from .SVGP import SVGP
 from .GPR import GPR
-from .BezierGP import BezierProcess
+from .BezierProcess import BezierProcess, LogBezierProcess
 from .IsoGPLVM import IsoGPLVM

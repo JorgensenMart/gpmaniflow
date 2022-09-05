@@ -25,9 +25,9 @@ class BernsteinPolynomial():
         return B_out
 
 
-class BernsteinNetwork(tf.keras.layers.Layer):
-    def __init__(self, input_dim = 1, orders = 1, num_perm = 20):
-        super(BernsteinNetwork,self).__init__()
+class BezierButtress(tf.keras.layers.Layer):
+    def __init__(self, input_dim = 1, orders = 1, perm = None, num_perm = 20):
+        super(BezierButtress,self).__init__()
         self.orders = orders
         _dummy = [0]; _dummy.extend(orders)
         self.input_dim = input_dim
@@ -38,9 +38,11 @@ class BernsteinNetwork(tf.keras.layers.Layer):
         
         varw_init = tf.random_normal_initializer(mean = -0.1, stddev = 0.1)
         #varw_init = tf.zeros_initializer()
-        #self.num_perm = num_perm
-        _perm = np.tile(range(self.input_dim), (self.num_perm,1))
-        self.perm = np.apply_along_axis(np.random.permutation, axis=1, arr=_perm)
+        if perm is None:
+            _perm = np.tile(range(self.input_dim), (self.num_perm,1))
+            self.perm = np.apply_along_axis(np.random.permutation, axis=1, arr=_perm)
+        else:
+            self.perm = perm
         self.meanw = (*[tf.Variable(initial_value = meanw_init(shape = (self.num_perm, _dummy[i] + 1, _dummy[i+1] + 1), dtype = default_float()), trainable = True,) for i in range(input_dim)],)
         self.varw = (*[tf.Variable(initial_value = varw_init(shape = (self.num_perm, _dummy[i] + 1, _dummy[i+1] + 1), dtype = default_float()), trainable = True,) for i in range(input_dim)],)
         
@@ -78,53 +80,36 @@ class BernsteinNetwork(tf.keras.layers.Layer):
         num_points = tf.reduce_prod(tf.cast(self.orders, dtype = default_float()) + 1.0)
         meanterm = tf.ones((self.num_perm, 1, 1), dtype = default_float())  
         traceterm = tf.ones((self.num_perm, 1, 1), dtype = default_float())  
-        #counter = tf.ones((self.num_perm, 1, 1), dtype = default_float())  
-        detterm = 0.0#tf.zeros(1, dtype = default_float()) 
+        detterm = 0.0 
         for i in range(self.input_dim):
             meanterm = tf.matmul(meanterm, self.meanw[i] ** 2 * tf.transpose(1 / self.prior_sc ** 2)) / (tf.cast(self.orders[i], default_float()) + 1.0)
             traceterm = tf.matmul(traceterm, tf.math.exp(self.varw[i])) / (tf.cast(self.orders[i], default_float()) + 1.0)
-            #counter = tf.matmul(counter, tf.ones_like(self.varw[i]))
-            #detterm += tf.reduce_mean(self.varw[i]) * (num_points * self.num_perm)
             detterm += tf.reduce_mean(self.varw[i]) * (self.num_perm)
         meanterm = tf.reduce_sum(meanterm, axis = (1,2))
         traceterm = tf.reduce_sum(traceterm, axis = (1,2))
-        #counter = tf.reduce_sum(counter)
-        meanterm = tf.reduce_sum(meanterm / self.prior_variance)## / self.prior_variance)
-        traceterm = tf.reduce_sum(traceterm / (self.prior_variance * self.posterior_precision))# / self.prior_variance)
+        meanterm = tf.reduce_sum(meanterm / self.prior_variance)
+        traceterm = tf.reduce_sum(traceterm / (self.prior_variance * self.posterior_precision))
         
-        #print(num_points * self.num_perm)
-        #print(meanterm)
-        #print(traceterm)
-        #print(detterm)
-        #print(num_points * tf.reduce_sum(tf.math.log(self.prior_variance * self.posterior_precision)))
         return 0.5 * (traceterm + meanterm - 1.0 + tf.reduce_sum(tf.math.log(self.prior_variance * self.posterior_precision)) - detterm)
-        #return 0.5 * (traceterm + meanterm - counter + num_points * tf.reduce_sum(tf.math.log(self.prior_variance * self.posterior_precision)) - detterm)
-        #return 0.5 * (traceterm + meanterm - (num_points * self.num_perm) + num_points * tf.reduce_sum(tf.math.log(self.prior_variance * self.posterior_precision)) - detterm)
-        #return 0.5 * (meanterm + num_points * (traceterm - detterm - self.num_perm + tf.reduce_sum(tf.math.log(self.prior_variance * self.posterior_precision))))
 
     def P_mean(self, batch):
         P = tf.ones((self.num_perm, tf.shape(batch)[0],1), dtype = default_float()) # [R, N, 1]
         for i in range(self.input_dim):
             P = tf.matmul(P, self.meanw[i]) # [R, N, o + 1]
-            #print(tf.one_hot(batch[:,i], self.orders[i] + 1, dtype = default_float()))
             K = tf.one_hot(batch[:,i], self.orders[i] + 1, dtype = default_float())
             K = tf.tile(K[None, :, :], [self.num_perm, 1, 1])
-            #print(K)
-            #P = P * tf.one_hot(batch[:,i] * self.orders[i], self.orders[i] + 1, dtype = default_float())
-            P = P * K###tf.one_hot(batch[:,i] * self.orders[i], self.orders[i] + 1, dtype = default_float())
-        #P = tf.reduce_sum(P, axis = 1, keepdims = True)
+            P = P * K
         P = tf.reduce_sum(P, axis = -1, keepdims = True)
         P = tf.reduce_sum(P, axis = 0)
         return P# [N, 1}
 
     def P_var(self, batch):
         P = tf.ones((self.num_perm, tf.shape(batch)[0],1), dtype = default_float()) # [R, N, 1]
-        #P = tf.ones((tf.shape(batch)[0],1), dtype = default_float())
         for i in range(self.input_dim):
             P = tf.matmul(P, tf.math.exp(self.varw[i]) * tf.transpose(self.prior_sc ** 2)) 
             K = tf.one_hot(batch[:,i], self.orders[i] + 1, dtype = default_float())
             K = tf.tile(K[None, :, :], [self.num_perm, 1, 1])
-            P = P * K#tf.one_hot(batch[:,i] * self.orders[i], self.orders[i] + 1, dtype = default_float())
+            P = P * K
         P = tf.reduce_sum(P, axis = -1, keepdims = True)
         P = tf.reduce_sum(P, axis = 0)
         return P # [N, 1]
@@ -144,13 +129,9 @@ def prior_adjusting(order):
     B = BernsteinPolynomial(order)
     BX = B(I)
     P = tf.linalg.inv( tf.squeeze(BX ** 2, axis = 1) )
-    return tf.sqrt( tf.matmul(P, tf.ones([order + 1, 1], dtype = default_float())) ) 
+    return tf.sqrt( tf.matmul(P, tf.ones([order + 1, 1], dtype = default_float()) )) 
 
 
 
 if __name__ == '__main__':
-    BN = BernsteinNetwork(input_dim = 1, orders = [4])
-    batch = GetAllListPairs(5, 1)
-    print(batch)
-    pm = BN.P_mean(batch)
-    print(pm)
+    pass
