@@ -51,13 +51,16 @@ class LogBezierButtress(tf.keras.layers.Layer):
         
         self.B = BernsteinPolynomial(self.orders[0])
         #self.prior_sc = tf.ones(self.orders[0] + 1, default_float())#prior_adjusting(self.orders[0])
-        self.prior_sc = prior_adjusting(self.orders[0])
+        self.prior_sc = prior_adjusting(self.orders[0], self.muN, self.sigma2N, self.num_perm)
         #self.prior_variance = Parameter(value = [1 / (self.num_perm)] * self.num_perm, dtype = default_float(), trainable = True, transform = positive())
         #self.posterior_precision = Parameter(value = [self.num_perm] * self.num_perm, dtype = default_float(), trainable = True, transform = positive()) 
     
     def f_mean(self, Xnew):
+        #if tf.rank(Xnew) == 3:
+        #    Xnew = tf.squeeze(Xnew, axis = 1)
         outB = self.B(Xnew) # [N, d, o + 1]
         outB = tf.gather(outB, self.perm, axis = 1)
+        #print(outB)
         outB = tf.transpose(outB, (1,0,2,3)) # [R, N, d, o + 1]
         f = tf.ones((self.num_perm, tf.shape(outB)[1], 1), dtype = default_float()) # [R, N, 1] 
         for i in range(self.input_dim):
@@ -68,7 +71,10 @@ class LogBezierButtress(tf.keras.layers.Layer):
         return f# [N, 1]
 
     def f_var(self, Xnew):
+        #if tf.rank(Xnew) == 3:
+        #    Xnew = tf.squeeze(Xnew, axis = 1)
         outB = self.B(Xnew) # [N, d, o + 1]
+        #print(outB)
         outB = tf.gather(outB, self.perm, axis = 1)
         outB = tf.transpose(outB, (1,0,2,3)) # [R, N, d, o + 1]
         #f1 = tf.ones((self.num_perm, tf.shape(outB)[1], 1), dtype = default_float()) # [R, N, 1]
@@ -122,7 +128,7 @@ class LogBezierButtress(tf.keras.layers.Layer):
 
     def kl(self):
         muN = self.muN / self.num_perm
-        sigma2N = self.sigma2N / self.num_perm ** 2
+        sigma2N = self.sigma2N / self.num_perm# ** 2
         #beta = np.log(1 + sigma2N/muN**2)
         a = 100.0
         
@@ -289,30 +295,59 @@ class LogBezierButtress(tf.keras.layers.Layer):
         P = tf.reduce_sum(P, axis = 0)
         return P # [N, 1]
 
-    def integral(self):
+    def integral_mean(self):
         num_points = tf.reduce_prod(tf.cast(self.orders, dtype = default_float()) + 1) 
         f = tf.ones((self.num_perm, 1, 1), dtype = default_float()) # [R, N, 1] 
         for i in range(self.input_dim):
             f = tf.matmul(f, tf.math.exp(self.meanw[i])) # [R, N, o+1]
         f = tf.reduce_sum(f)
         return f / num_points
+        
+    def integral_variance(self):
+        num_points = tf.reduce_prod(tf.cast(self.orders, dtype = default_float()) + 1) 
+        
+        one = tf.ones((self.num_perm, 1, 1), dtype = default_float()) # [R, N, 1]
+        two = tf.ones((self.num_perm, 1, 1), dtype = default_float()) # [R, N, 1]
+        three = tf.ones((self.num_perm, 1, 1), dtype = default_float()) # [R, N, 1]
+        four = tf.ones((self.num_perm, 1, 1), dtype = default_float()) # [R, N, 1]
+        five = tf.ones((self.num_perm, 1, 1), dtype = default_float()) # [R, N, 1]
+        six = tf.ones((self.num_perm, 1, 1), dtype = default_float()) # [R, N, 1]
+        
+        for i in range(self.input_dim):
+            one = tf.matmul(one, tf.math.exp(self.meanw[i]) ** 2  * tf.math.exp(self.varw[i])) # [R, N, o+1]
+            two = tf.matmul(two, tf.math.exp(self.meanw[i]) ** 2  * tf.math.exp(self.varw[i]) ** 2 ) # [R, N, o+1]
+            three = tf.matmul(three, tf.math.exp(self.meanw[i]) ** 2  * tf.math.exp(self.varw[i]) ** 3 ) # [R, N, o+1]
+            four = tf.matmul(four, tf.math.exp(self.meanw[i]) ** 2  * tf.math.exp(self.varw[i]) ** 4 ) # [R, N, o+1]
+            five = tf.matmul(five, tf.math.exp(self.meanw[i]) ** 2  * tf.math.exp(self.varw[i]) ** 5 ) # [R, N, o+1]
+            six = tf.matmul(six, tf.math.exp(self.meanw[i]) ** 2  * tf.math.exp(self.varw[i]) ** 6 ) # [R, N, o+1]
+        
+        
+        one = tf.reduce_sum(one, axis = -1, keepdims = True) # [R, N, 1]
+        two = tf.reduce_sum(two, axis = -1, keepdims = True) # [R, N, 1]
+        three = tf.reduce_sum(three, axis = -1, keepdims = True) # [R, N, 1]
+        four = tf.reduce_sum(four, axis = -1, keepdims = True) # [R, N, 1]
+        five = tf.reduce_sum(five, axis = -1, keepdims = True) # [R, N, 1]
+        six = tf.reduce_sum(six, axis = -1, keepdims = True) # [R, N, 1]
+        
+        f = tf.reduce_sum(one + 1/2 * two + 1/6 * three + 1/24 * four + 1/120 * five + 1/720 * six)# - tf.reduce_sum(meanterm, axis = 0)
+        return f / num_points ** 2
 
-def prior_adjusting(order):
-    muN = 0.8 / 20#self.num_perm
-    sigma2N = 3 / 20 #self.num_perm ** 2
+def prior_adjusting(order, muN, sigma2N, num_perm):
+    muN = muN / num_perm
+    sigma2N = sigma2N / num_perm #** 2
     #if order > 25:
     #    raise NotImplementedError
     #I = tf.cast(GetAllListPairs(order + 1, 1), default_float()) / order
-    op = 501
+    op = 16
     I = tf.cast(GetAllListPairs(op, 1), default_float()) / (op-1)
     #print(I)
     B = BernsteinPolynomial(order)
     BX = B(I)
     #print(BX.shape)
-    P = tf.linalg.pinv( tf.squeeze(BX ** 2, axis = 1), rcond = 0.01)
+    P = tf.linalg.pinv( tf.squeeze(BX ** 2, axis = 1), rcond = 0.005)
     #print(P)
     solve = tf.matmul(P, sigma2N / muN ** 2 * tf.ones([op, 1], dtype = default_float()))  
-    #print(solve)
+    print(solve)
     #solve = tf.math.abs(solve)
     #return tf.math.sqrt(tf.math.log(1 + solve/muN**2))
     #a = 1000.0
