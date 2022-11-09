@@ -1,3 +1,5 @@
+from typing import Optional
+
 import tensorflow as tf
 import tensorflow_probability as tfp
 import numpy as np
@@ -21,7 +23,7 @@ class BezierProcess(BayesianModel, ExternalDataTrainingLossMixin):
             input_dim,
             likelihood: Likelihood, # Testing phase.
             orders = 1,
-            num_data = None,
+            num_data: Optional[tf.Tensor] = None,
             perm = None, # means random
             num_perm = 20
             ):
@@ -73,7 +75,9 @@ class LogBezierProcess(BayesianModel, ExternalDataTrainingLossMixin):
             input_dim,
             likelihood: Likelihood, # Testing phase.
             orders = 1,
-            num_data = None,
+            muN = 0.8,
+            sigma2N = 3,
+            num_data: Optional[tf.Tensor] = None,
             perm = None, # means random
             num_perm = 20
             ):
@@ -88,8 +92,10 @@ class LogBezierProcess(BayesianModel, ExternalDataTrainingLossMixin):
         else:
             self.num_perm = perm.shape[0]
         self.likelihood = likelihood
+        self.muN = muN
+        self.sigma2N = sigma2N
         
-        self.BB = LogBezierButtress(input_dim = input_dim, orders = listo, perm = perm, num_perm = self.num_perm)        
+        self.BB = LogBezierButtress(input_dim = input_dim, orders = listo, muN = muN, sigma2N = sigma2N, perm = perm, num_perm = self.num_perm)        
 
     def maximum_log_likelihood_objective(self, data: RegressionData) -> tf.Tensor:
         return self.elbo(data)
@@ -119,7 +125,6 @@ class LogBezierProcess(BayesianModel, ExternalDataTrainingLossMixin):
         f_mean, f_var = self.predict_f(X)
         
         var_exp = self.variational_expectations(f_mean, f_var, Y)
-        #print(var_exp)
         # CHANGE
         if self.num_data is None:
             scale = 1

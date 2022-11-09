@@ -1,4 +1,4 @@
-import pandas as pd
+#import pandas as pd
 import numpy as np
 from scipy.special import factorial as scipyfac
 from scipy.spatial import KDTree
@@ -16,6 +16,19 @@ def binomial_coef(n, i):
     #print(i)
     #ni = n - i
     return factorial(n) / (factorial(i) * factorial(n - i))
+    
+def log_beta_function(z1, z2):
+    return tf.math.lgamma(z1) + tf.math.lgamma(z2) - tf.math.lgamma(z1 + z2)
+
+def xlog(x):
+    return tf.where(tf.equal(x, tf.zeros_like(x)), tf.cast(tf.ones_like(x), default_float()), x * tf.cast(tf.math.log(x), default_float()))
+
+def BetaGammaIntegral(gamma, order, i): 
+    logconst = - (-xlog(order) + xlog(i) + xlog(order - i) + tf.cast(tf.math.log(binomial_coef(order,i)), default_float())) * (gamma-1)
+    logconst2 = tf.cast(tf.math.log(binomial_coef(order, i)), default_float()) * gamma
+    logintegral = log_beta_function(gamma*i + 1, gamma*(order - i) + 1)
+    out = tf.math.exp(logintegral + logconst + logconst2)
+    return out
 
 def bezier_coef(n):
     k = np.ones(n+1)

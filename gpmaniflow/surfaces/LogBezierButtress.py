@@ -7,14 +7,32 @@ from gpflow.base import Parameter, Module
 from gpflow.utilities import positive
 
 from gpmaniflow.utils import binomial_coef as binom
-from gpmaniflow.utils import GetAllListPairs
+from gpmaniflow.utils import GetAllListPairs, BetaGammaIntegral
+
+#class BernsteinPolynomial():
+#    def __init__(self, orders = None):
+#        self.orders = orders
+#    
+#    def __call__(self, Xnew: InputData):
+#        return self.forward(Xnew)
+#
+#    def forward(self, Xnew: InputData):
+#        O = self.orders + 1
+#        Xnew = tf.stack([Xnew] * O, axis = 2)
+#        X1 = tf.math.pow(Xnew, range(O))
+#        X2 = tf.math.pow(1. - Xnew, np.array(self.orders) - range(O))
+#        B_out = X1 * X2 * binom(np.array(self.orders), range(O))
+#        return B_out
 
 class BernsteinPolynomial():
     def __init__(self, orders = None):
         self.orders = orders
-    
-    def __call__(self, Xnew: InputData):
-        return self.forward(Xnew)
+        self.seq = np.linspace(0, self.orders, self.orders + 1)
+    def __call__(self, Xnew: InputData, gamma = 1.0):
+        #print(self.orders)
+        C = 1 / (self.orders ** (-self.orders) * self.seq ** (self.seq) * (self.orders - self.seq) ** (self.orders - self.seq) * binom(self.orders, self.seq)) ** (gamma-1)
+        #print(C)
+        return C[None,None,:] * self.forward(Xnew) ** gamma
 
     def forward(self, Xnew: InputData):
         O = self.orders + 1
@@ -23,7 +41,6 @@ class BernsteinPolynomial():
         X2 = tf.math.pow(1. - Xnew, np.array(self.orders) - range(O))
         B_out = X1 * X2 * binom(np.array(self.orders), range(O))
         return B_out
-
 
 class LogBezierButtress(tf.keras.layers.Layer):
     def __init__(self, input_dim = 1, orders = 1, muN = 0.8, sigma2N = 3, perm = None, num_perm = 20):
@@ -35,11 +52,15 @@ class LogBezierButtress(tf.keras.layers.Layer):
         
         self.muN = muN
         self.sigma2N = sigma2N
-        
-        meanw_init = tf.random_normal_initializer(mean = (tf.math.log(tf.cast(self.muN, default_float())/ self.num_perm)) ** (1/self.input_dim), stddev = 0.1)
+        self.gamma = Parameter(1.00001, transform=positive(lower=1.0))
+ 
+        self.prior_sc = prior_adjusting(self.orders[0], self.muN, self.sigma2N, self.num_perm, self.input_dim, self.gamma)
+        print(self.prior_sc)
+        meanw_init = tf.random_normal_initializer(mean = (tf.math.log(tf.cast(self.muN, default_float())/ self.num_perm)) * (1/self.input_dim), stddev = 0.1)
         #meanw_init = tf.zeros_initializer()
         
-        varw_init = tf.random_normal_initializer(mean = tf.math.log(tf.cast(self.sigma2N, default_float())), stddev = 0.05)
+        #varw_init = tf.random_normal_initializer(mean = tf.math.log(tf.cast(self.sigma2N, default_float())) * (1/self.input_dim), stddev = 0.05)
+        varw_init = tf.random_normal_initializer(mean = tf.math.log(tf.reduce_mean(self.prior_sc**2)), stddev = 0.0005)
         #varw_init = tf.zeros_initializer()
         if perm is None:
             _perm = np.tile(range(self.input_dim), (self.num_perm,1))
@@ -50,15 +71,18 @@ class LogBezierButtress(tf.keras.layers.Layer):
         self.varw = (*[tf.Variable(initial_value = varw_init(shape = (self.num_perm, _dummy[i] + 1, _dummy[i+1] + 1), dtype = default_float()), trainable = True,) for i in range(input_dim)],)
         
         self.B = BernsteinPolynomial(self.orders[0])
+        #self.gamma = tf.Variable(initial_value = 1.0, trainable = True, dtype = default_float())
+        
         #self.prior_sc = tf.ones(self.orders[0] + 1, default_float())#prior_adjusting(self.orders[0])
-        self.prior_sc = prior_adjusting(self.orders[0], self.muN, self.sigma2N, self.num_perm)
+        #self.prior_sc = prior_adjusting(self.orders[0], self.muN, self.sigma2N, self.num_perm)
         #self.prior_variance = Parameter(value = [1 / (self.num_perm)] * self.num_perm, dtype = default_float(), trainable = True, transform = positive())
         #self.posterior_precision = Parameter(value = [self.num_perm] * self.num_perm, dtype = default_float(), trainable = True, transform = positive()) 
     
     def f_mean(self, Xnew):
         #if tf.rank(Xnew) == 3:
         #    Xnew = tf.squeeze(Xnew, axis = 1)
-        outB = self.B(Xnew) # [N, d, o + 1]
+        outB = self.B(Xnew, self.gamma) # [N, d, o + 1]
+        #print(outB)
         outB = tf.gather(outB, self.perm, axis = 1)
         #print(outB)
         outB = tf.transpose(outB, (1,0,2,3)) # [R, N, d, o + 1]
@@ -67,13 +91,14 @@ class LogBezierButtress(tf.keras.layers.Layer):
             f = tf.matmul(f, tf.math.exp(self.meanw[i])) # [R, N, o+1]
             f = f * outB[:,:,i,:] # [R, N, o + 1]
         f = tf.reduce_sum(f, axis = -1, keepdims = True)
+        #print(f)
         f = tf.reduce_sum(f, axis = 0)
         return f# [N, 1]
 
     def f_var(self, Xnew):
         #if tf.rank(Xnew) == 3:
         #    Xnew = tf.squeeze(Xnew, axis = 1)
-        outB = self.B(Xnew) # [N, d, o + 1]
+        outB = self.B(Xnew, self.gamma) # [N, d, o + 1]
         #print(outB)
         outB = tf.gather(outB, self.perm, axis = 1)
         outB = tf.transpose(outB, (1,0,2,3)) # [R, N, d, o + 1]
@@ -130,7 +155,7 @@ class LogBezierButtress(tf.keras.layers.Layer):
         muN = self.muN / self.num_perm
         sigma2N = self.sigma2N / self.num_perm# ** 2
         #beta = np.log(1 + sigma2N/muN**2)
-        a = 100.0
+        a = 1000.0
         
         num_points = tf.reduce_prod(tf.cast(self.orders, dtype = default_float()) + 1.0)
         beta = tf.ones((self.num_perm, 1, 1), dtype = default_float())  
@@ -149,8 +174,8 @@ class LogBezierButtress(tf.keras.layers.Layer):
         detterm2 = 0.0
         for i in range(self.input_dim):
             traceterm = tf.matmul(traceterm, tf.math.exp(self.varw[i]) * tf.transpose(1 / self.prior_sc **2)) / (tf.cast(self.orders[i], default_float()) + 1.0)
-            detterm += tf.reduce_mean(self.varw[i])
-            detterm2 += tf.reduce_mean(tf.math.log(tf.ones_like(self.varw[i]) * tf.transpose(self.prior_sc ** 2)))
+            detterm += tf.reduce_mean(self.varw[i]) #* self.num_perm
+            detterm2 += tf.reduce_mean(tf.math.log(tf.ones_like(self.varw[i]) * tf.transpose(self.prior_sc ** 2))) #* self.num_perm
             beta = tf.matmul(beta, tf.ones_like(self.varw[i]) * tf.transpose(self.prior_sc **2)) / (tf.cast(self.orders[i], default_float()) + 1.0)
             invbeta = tf.matmul(invbeta, tf.ones_like(self.varw[i]) * tf.transpose(1 / self.prior_sc **2)) / (tf.cast(self.orders[i], default_float()) + 1.0)
             I211 = tf.matmul(I211, (muN ** (1/self.input_dim)/tf.math.exp(self.meanw[i])) ** (2.0/a) * tf.transpose(1 / self.prior_sc **2)) / (tf.cast(self.orders[i], default_float()) + 1.0)
@@ -164,10 +189,13 @@ class LogBezierButtress(tf.keras.layers.Layer):
         
         traceterm = tf.reduce_sum(traceterm, axis = (1,2))
         traceterm = tf.reduce_mean(traceterm)
+        #traceterm = tf.reduce_sum(traceterm)
         beta = tf.reduce_sum(beta, axis = (1,2))
         beta = tf.reduce_mean(beta)
+        #beta = tf.reduce_sum(beta)
         invbeta = tf.reduce_sum(invbeta, axis = (1,2))
         invbeta = tf.reduce_mean(invbeta)
+        #invbeta = tf.reduce_sum(invbeta)
 
         I211 = tf.reduce_sum(I211, axis = (1,2))
         I211 = tf.reduce_mean(I211)
@@ -192,9 +220,9 @@ class LogBezierButtress(tf.keras.layers.Layer):
         traceterm = traceterm
         detterm = detterm2 - detterm
         #print(beta)
-        #print(meanterm)
-        #print(traceterm)
-        #print(detterm)
+        print(meanterm)
+        print(traceterm)
+        print(detterm)
         return num_points*0.5*(traceterm - 1.0 + meanterm + detterm) 
 
     """
@@ -300,8 +328,12 @@ class LogBezierButtress(tf.keras.layers.Layer):
         f = tf.ones((self.num_perm, 1, 1), dtype = default_float()) # [R, N, 1] 
         for i in range(self.input_dim):
             f = tf.matmul(f, tf.math.exp(self.meanw[i])) # [R, N, o+1]
+            bgi = BetaGammaIntegral(self.gamma, tf.cast(self.orders[i], default_float()), tf.linspace(0,self.orders[i], tf.cast(self.orders[i] + 1, tf.int32)))
+            #print(bgi)
+            f = f * bgi[None,None,:] #
+            #print(f)
         f = tf.reduce_sum(f)
-        return f / num_points
+        return f
         
     def integral_variance(self):
         num_points = tf.reduce_prod(tf.cast(self.orders, dtype = default_float()) + 1) 
@@ -332,30 +364,41 @@ class LogBezierButtress(tf.keras.layers.Layer):
         f = tf.reduce_sum(one + 1/2 * two + 1/6 * three + 1/24 * four + 1/120 * five + 1/720 * six)# - tf.reduce_sum(meanterm, axis = 0)
         return f / num_points ** 2
 
-def prior_adjusting(order, muN, sigma2N, num_perm):
+def prior_adjusting(order, muN, sigma2N, num_perm, d, gamma):
     muN = muN / num_perm
     sigma2N = sigma2N / num_perm #** 2
     #if order > 25:
     #    raise NotImplementedError
     #I = tf.cast(GetAllListPairs(order + 1, 1), default_float()) / order
-    op = 16
+    op = 10
     I = tf.cast(GetAllListPairs(op, 1), default_float()) / (op-1)
     #print(I)
     B = BernsteinPolynomial(order)
-    BX = B(I)
+    BX = B(I, gamma = gamma)
     #print(BX.shape)
-    P = tf.linalg.pinv( tf.squeeze(BX ** 2, axis = 1), rcond = 0.005)
+    P = tf.linalg.pinv( tf.squeeze(BX ** 2, axis = 1))#, rcond = 0.01)
+    #P = tf.linalg.solve( tf.squeeze(BX ** 2, axis = 1))
+    #P = tf.linalg.inv
+    #d = 20
     #print(P)
-    solve = tf.matmul(P, sigma2N / muN ** 2 * tf.ones([op, 1], dtype = default_float()))  
+    #solve = tf.matmul(P, sigma2N / muN ** 2 * tf.ones([op, 1], dtype = default_float()))  
+    solve = tf.matmul(P, (sigma2N/muN**2) ** (1/d) * tf.ones([op, 1], dtype = default_float()))  
+    #solve = tf.matmul(P, (sigma2N) ** (1/d) * tf.ones([op, 1], dtype = default_float()))  
+    #solve = tf.matmul(P, sigma2N * tf.random.normal([op, 1], mean = 1.0, stddev = 1e-4, dtype = default_float()))
+    #a = 10000.
+    #c = (a*(solve**d)**(1/a)-a)/(a*(solve**d)**(1/a))
+    #print(c)
     print(solve)
-    #solve = tf.math.abs(solve)
-    #return tf.math.sqrt(tf.math.log(1 + solve/muN**2))
+    print(tf.matmul(tf.squeeze(BX, axis = 1)**2,solve))
+    return tf.math.sqrt(tf.math.log(1 + solve))
     #a = 1000.0
-    return tf.math.sqrt(tf.math.log(1.0 + solve))
+    #return tf.math.sqrt(tf.math.log(1.0 + solve/muN**2)) #* (1/10))
+    #return tf.math.sqrt((c*a)**(1/d)*solve**(1/a))
 
 
 if __name__ == '__main__':
-    out = prior_adjusting(100)
-    out2 = prior_adjusting(10)
-    #print(out)
+    out = prior_adjusting(10, 0.001, 0.001, 20, 2)
+    #out2 = prior_adjusting(10, 5, 6, 1)
+    print(out)
+    #print(out2)
     pass

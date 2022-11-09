@@ -1,1 +1,1 @@
-from .utils import factorial, bezier_coef, Kronecker, binomial_coef, GetAllListPairs, GetNearGridPoints, GetNearGridPoints2, GetNearGridPoints3, DiscretiseX, uniq, uniq_keep_order
+from .utils import factorial, bezier_coef, Kronecker, binomial_coef, log_beta_function, BetaGammaIntegral, GetAllListPairs, GetNearGridPoints, GetNearGridPoints2, GetNearGridPoints3, DiscretiseX, uniq, uniq_keep_order
