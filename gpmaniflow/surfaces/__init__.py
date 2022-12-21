@@ -1,2 +1,2 @@
 from .controlpoints import BernsteinPolynomial, BezierButtress
-from .LogBezierButtress import LogBezierButtress
+from .LogBezierButtress import LogBezierButtress, RBF
