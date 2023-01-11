@@ -70,7 +70,8 @@ class LogBezierButtress(tf.keras.layers.Layer):
         #meanw_init = tf.zeros_initializer()
         
         #varw_init = tf.random_normal_initializer(mean = tf.math.log(tf.cast(self.sigma2N, default_float())) * (1/self.input_dim), stddev = 0.05)
-        varw_init = tf.random_normal_initializer(mean = tf.math.log(tf.reduce_mean(self.prior_sc**2)), stddev = 0.0005)
+        #varw_init = tf.random_normal_initializer(mean =  tf.reduce_min(self.prior_sc ** 2), stddev = 0.001)
+        varw_init = tf.random_normal_initializer(mean =  (tf.math.log(tf.cast(2., default_float()))) ** (1/self.input_dim) / self.num_perm, stddev = 0.001)
         #varw_init = tf.zeros_initializer()
         if perm is None:
             _perm = np.tile(range(self.input_dim), (self.num_perm,1))
@@ -384,7 +385,7 @@ class LogBezierButtress(tf.keras.layers.Layer):
 
 def prior_adjusting(order, muN, sigma2N, num_perm, d, gamma):
     muN = muN / num_perm
-    sigma2N = sigma2N / num_perm #** 2
+    sigma2N = sigma2N / num_perm ** 2
     #if order > 25:
     #    raise NotImplementedError
     #I = tf.cast(GetAllListPairs(order + 1, 1), default_float()) / order
@@ -399,27 +400,32 @@ def prior_adjusting(order, muN, sigma2N, num_perm, d, gamma):
     #P = tf.linalg.inv
     #d = 20
     #print(P)
-    #solve = tf.matmul(P, sigma2N / muN ** 2 * tf.ones([op, 1], dtype = default_float()))  
-    solve = tf.matmul(P, (sigma2N/muN**2) ** (1/d) * tf.ones([op, 1], dtype = default_float()))  
+    solve = tf.matmul(P, sigma2N / muN ** 2 * tf.ones([op, 1], dtype = default_float()))  
+    #solve = tf.matmul(P, (sigma2N/muN**2) ** (1/d) * tf.ones([op, 1], dtype = default_float()))  
     #solve = tf.matmul(P, (sigma2N) ** (1/d) * tf.ones([op, 1], dtype = default_float()))  
     #solve = tf.matmul(P, sigma2N * tf.random.normal([op, 1], mean = 1.0, stddev = 1e-4, dtype = default_float()))
     #a = 10000.
     #c = (a*(solve**d)**(1/a)-a)/(a*(solve**d)**(1/a))
     #print(c)
-    #print(solve)
+    print(solve)
     #print(tf.matmul(tf.squeeze(BX, axis = 1)**2,solve))
-    return tf.math.sqrt(tf.math.log(1 + solve))
+    print(tf.math.log(1. + solve))
+    print(tf.math.log(tf.math.log(1. + solve)))
+    #return tf.math.sqrt(tf.math.log(tf.math.log(1. + solve)))
+    return tf.math.sqrt(tf.math.log(1. + tf.ones_like(solve))) ** (1/d)
+    #return tf.math.sqrt(tf.ones_like(solve))
     #a = 1000.0
     #return tf.math.sqrt(tf.math.log(1.0 + solve/muN**2)) #* (1/10))
     #return tf.math.sqrt((c*a)**(1/d)*solve**(1/a))
 
 
 if __name__ == '__main__':
-    R = RBF(20)
+    #R = RBF(20)
     #R([[0.3]])
-    print(R([[0.1, 0.3]], ls = 0.1))
-    #out = prior_adjusting(10, 0.001, 0.001, 20, 2)
+    #print(R([[0.1, 0.3]], ls = 0.1))
+    #out = prior_adjusting(10, 1., 1., 20, 4, 1.)
+    out2 = prior_adjusting(10, 1., 1., 20, 60, 1.)
     #out2 = prior_adjusting(10, 5, 6, 1)
     #print(out)
-    #print(out2)
+    print(out2)
     pass
